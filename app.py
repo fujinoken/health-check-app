@@ -1031,7 +1031,8 @@ if menu == "管理者ダッシュボード":
     ex_df = load_excretion_data()
     today = date.today()
 
-    today_health = get_day_excretion_data(ex_df, today, None)
+    today_excretion = get_day_excretion_data(ex_df, today, None)
+
     h_today = health_df.copy()
     if not h_today.empty:
         h_today["記録日"] = pd.to_datetime(h_today["記録日"], errors="coerce")
@@ -1039,17 +1040,24 @@ if menu == "管理者ダッシュボード":
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("本日の健康記録", len(h_today))
-    col2.metric("本日の排泄記録", len(today_health))
+    col2.metric("本日の排泄記録", len(today_excretion))
     col3.metric("利用者数", len(active_users))
 
-    ex_sum = summarize_excretion(today_health)
+    ex_sum = summarize_excretion(today_excretion)
     col4.metric("本日の排便記録", ex_sum["排便回数"])
 
+    st.subheader("本日の申し送り支援")
+    st.text_area(
+        "申し送りメモ",
+        value=create_handover_text(health_df, ex_df, today),
+        height=320,
+    )
+
     st.subheader("本日の排泄状況")
-    if today_health.empty:
+    if today_excretion.empty:
         st.info("本日の排泄記録はまだありません。")
     else:
-        st.dataframe(today_health, use_container_width=True, hide_index=True)
+        st.dataframe(today_excretion, use_container_width=True, hide_index=True)
 
         if ex_sum["濃縮尿"] or ex_sum["下痢便"] or ex_sum["水様便"]:
             st.warning(
@@ -1058,9 +1066,6 @@ if menu == "管理者ダッシュボード":
             )
         else:
             st.success("本日の排泄状況で大きな注意記録はありません。")
-
-    st.subheader("本日の申し送り支援")
-    st.text_area("申し送りメモ", value=create_handover_text(health_df, ex_df, today), height=320)
 
 
 # =========================
