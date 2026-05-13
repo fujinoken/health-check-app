@@ -541,14 +541,29 @@ def safe_text(value):
 
 
 
-def build_excretion_inputs():
-    """時系列で排泄状況を入力し、合計回数と詳細データを返す。"""
+def build_excretion_inputs(existing_row=None):
+    """時系列で排泄状況を入力し、合計回数と詳細データを返す。
+    既存データがある場合は、その値を初期表示する。
+    """
     st.subheader("排泄状況")
     st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。尿量・便量が「なし」の場合、性状は保存時に空欄になります。")
 
     excretion_data = {}
     urine_count = 0
     stool_count = 0
+
+    def get_existing_value(col_name, default):
+        if existing_row is None:
+            return default
+        value = existing_row.get(col_name, default)
+        if pd.isna(value) or value == "":
+            return default
+        return str(value)
+
+    def get_index(options, value, default_index=0):
+        if value in options:
+            return options.index(value)
+        return default_index
 
     def slot_card(slot, time_label, card_color, border_color):
         nonlocal urine_count, stool_count, excretion_data
@@ -563,33 +578,36 @@ def build_excretion_inputs():
             unsafe_allow_html=True,
         )
 
-        # 「なし」を選んでも性状欄は選べるようにしておく。
-        # 保存時に量が「なし」の場合は性状を空欄保存する。
+        urine_amount_default = get_existing_value(f"{slot}尿量", "なし")
+        urine_type_default = get_existing_value(f"{slot}尿性状", "普通尿")
+        stool_amount_default = get_existing_value(f"{slot}便量", "なし")
+        stool_type_default = get_existing_value(f"{slot}便性状", "普通便")
+
         urine_amount = st.selectbox(
             f"{slot} 尿量",
             URINE_AMOUNT_OPTIONS,
-            index=0,
+            index=get_index(URINE_AMOUNT_OPTIONS, urine_amount_default),
             key=f"excretion_{slot}_urine_amount",
         )
 
         urine_type = st.selectbox(
             f"{slot} 尿性状",
             URINE_TYPE_OPTIONS,
-            index=0,
+            index=get_index(URINE_TYPE_OPTIONS, urine_type_default),
             key=f"excretion_{slot}_urine_type",
         )
 
         stool_amount = st.selectbox(
             f"{slot} 便量",
             STOOL_AMOUNT_OPTIONS,
-            index=0,
+            index=get_index(STOOL_AMOUNT_OPTIONS, stool_amount_default),
             key=f"excretion_{slot}_stool_amount",
         )
 
         stool_type = st.selectbox(
             f"{slot} 便性状",
             STOOL_TYPE_OPTIONS,
-            index=0,
+            index=get_index(STOOL_TYPE_OPTIONS, stool_type_default),
             key=f"excretion_{slot}_stool_type",
         )
 
@@ -637,148 +655,6 @@ def build_excretion_inputs():
         st.dataframe(preview, use_container_width=True, hide_index=True)
 
     return urine_count, stool_count, excretion_data
-
-
-def build_excretion_admin_summary(df, active_users, target_start, target_end):
-    """管理者向け：排泄詳細を集計し、状況把握用データを返す。"""
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    work = df.copy()
-    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
-
-    work = work[
-        (work["記録日"].dt.date >= target_start)
-        & (work["記録日"].dt.date <= target_end)
-    ].copy()
-
-    if work.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-    summary_rows = []
-
-    for user in active_users:
-        user_df = work[work["利用者名"] == user].copy()
-
-        if user_df.empty:
-            summary_rows.append(
-                {
-                    "利用者名": user,
-                    "記録日数": 0,
-                    "排尿回数合計": 0,
-                    "排便回数合計": 0,
-                    "排便なし日数": 0,
-                    "濃縮尿記録": 0,
-                    "下痢便記録": 0,
-                    "水様便記録": 0,
-                    "注意メモ": "記録なし",
-                }
-            )
-            continue
-
-        urine_total = int(to_number(user_df["排尿回数"]).fillna(0).sum())
-        stool_total = int(to_number(user_df["排便回数"]).fillna(0).sum())
-        no_stool_days = int((to_number(user_df["排便回数"]).fillna(0) == 0).sum())
-
-        concentrated_urine = 0
-        diarrhea = 0
-        watery = 0
-
-        for slot, _ in EXCRETION_SLOTS:
-            urine_type_col = f"{slot}尿性状"
-            stool_type_col = f"{slot}便性状"
-
-            if urine_type_col in user_df.columns:
-                concentrated_urine += int((user_df[urine_type_col].fillna("") == "濃縮尿").sum())
-
-            if stool_type_col in user_df.columns:
-                diarrhea += int((user_df[stool_type_col].fillna("") == "下痢便").sum())
-                watery += int((user_df[stool_type_col].fillna("") == "水様便").sum())
-
-        notes = []
-        if no_stool_days >= 3:
-            notes.append("排便なし日数が多い")
-        if concentrated_urine > 0:
-            notes.append("濃縮尿あり")
-        if diarrhea > 0:
-            notes.append("下痢便あり")
-        if watery > 0:
-            notes.append("水様便あり")
-
-        summary_rows.append(
-            {
-                "利用者名": user,
-                "記録日数": len(user_df),
-                "排尿回数合計": urine_total,
-                "排便回数合計": stool_total,
-                "排便なし日数": no_stool_days,
-                "濃縮尿記録": concentrated_urine,
-                "下痢便記録": diarrhea,
-                "水様便記録": watery,
-                "注意メモ": "、".join(notes) if notes else "大きな注意記録なし",
-            }
-        )
-
-    summary_df = pd.DataFrame(summary_rows)
-
-    detail_cols = [
-        "記録日",
-        "利用者名",
-        "排尿回数",
-        "排便回数",
-    ]
-
-    for slot, _ in EXCRETION_SLOTS:
-        detail_cols.extend(
-            [
-                f"{slot}尿量",
-                f"{slot}尿性状",
-                f"{slot}便量",
-                f"{slot}便性状",
-            ]
-        )
-
-    detail_cols = [col for col in detail_cols if col in work.columns]
-    detail_df = work[detail_cols].sort_values(["記録日", "利用者名"])
-
-    alert_rows = []
-
-    for _, row in work.iterrows():
-        alerts = []
-
-        if safe_int(row.get("排便回数"), 0) == 0:
-            alerts.append("排便なし")
-
-        for slot, _ in EXCRETION_SLOTS:
-            urine_amount = safe_text(row.get(f"{slot}尿量", ""))
-            urine_type = safe_text(row.get(f"{slot}尿性状", ""))
-            stool_amount = safe_text(row.get(f"{slot}便量", ""))
-            stool_type = safe_text(row.get(f"{slot}便性状", ""))
-
-            if urine_type == "濃縮尿":
-                alerts.append(f"{slot}：濃縮尿")
-            if stool_type in ["下痢便", "水様便"]:
-                alerts.append(f"{slot}：{stool_type}")
-            if stool_amount == "大":
-                alerts.append(f"{slot}：便量大")
-            if urine_amount == "大":
-                alerts.append(f"{slot}：尿量大")
-
-        if alerts:
-            alert_rows.append(
-                {
-                    "記録日": row.get("記録日"),
-                    "利用者名": row.get("利用者名"),
-                    "確認内容": "、".join(alerts),
-                    "気になる変化": row.get("気になる変化", ""),
-                    "入力者": row.get("入力者", ""),
-                }
-            )
-
-    alert_df = pd.DataFrame(alert_rows)
-
-    return summary_df, detail_df, alert_df
-
 
 def build_excretion_summary_text(target):
     """排泄詳細を家族向け・管理者向けに簡潔にまとめる。"""
@@ -2016,6 +1892,7 @@ if menu == "管理者ダッシュボード":
 
 # =========================
 # 健康チェック入力
+# 記録日＋利用者名をキーに、データありなら初期表示・データなしなら初期値表示
 # =========================
 elif menu == "健康チェック入力":
     st.header("健康チェック入力")
@@ -2027,42 +1904,82 @@ elif menu == "健康チェック入力":
     if not active_users:
         st.stop()
 
-    with st.form("health_form", clear_on_submit=True):
-        col1, col2, col3 = st.columns(3)
+    # 先に検索キーだけをフォーム外で選ぶ。
+    # これにより、記録日・利用者名を変更した時点で画面が再判定される。
+    key_col1, key_col2, key_col3 = st.columns(3)
 
-        with col1:
-            record_date = st.date_input("記録日", value=date.today())
+    with key_col1:
+        record_date = st.date_input(
+            "記録日",
+            value=date.today(),
+            key="input_record_date",
+        )
 
-        with col2:
-            user_name = st.selectbox("利用者名", active_users)
+    with key_col2:
+        user_name = st.selectbox(
+            "利用者名",
+            active_users,
+            key="input_user_name",
+        )
 
-        with col3:
-            input_staff = st.text_input("入力者", placeholder="例：藤野")
+    with key_col3:
+        input_staff = st.text_input(
+            "入力者",
+            placeholder="例：藤野",
+            key="input_staff_name",
+        )
 
-        existing_df = load_data()
-        existing_idx = find_record_index(existing_df, record_date, user_name)
+    existing_df = load_data()
+    existing_idx = find_record_index(existing_df, record_date, user_name)
 
-        if existing_idx is None:
-            st.markdown(
-                """
-                <div style='background:#EAF4FF; border:1px solid #9CC7F0; color:#174A7C; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
-                    <b>この記録日・利用者名のデータはありません。</b><br>
-                    登録すると新規データとして保存されます。
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                """
-                <div style='background:#FFF3E0; border:1px solid #F0B36A; color:#8A4B00; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
-                    <b>この記録日・利用者名のデータは既にあります。</b><br>
-                    登録すると上書き更新されます。
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    if existing_idx is None:
+        existing_row = None
+        st.markdown(
+            """
+            <div style='background:#EAF4FF; border:1px solid #9CC7F0; color:#174A7C; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
+                <b>この記録日・利用者名のデータはありません。</b><br>
+                登録すると新規データとして保存されます。数値項目は0または初期値で表示しています。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        existing_row = existing_df.loc[existing_idx]
+        st.markdown(
+            """
+            <div style='background:#FFF3E0; border:1px solid #F0B36A; color:#8A4B00; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
+                <b>この記録日・利用者名のデータは既にあります。</b><br>
+                登録すると上書き更新されます。既存データを初期表示しています。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
+    def row_float(col, default):
+        if existing_row is None:
+            return default
+        return safe_float(existing_row.get(col), default)
+
+    def row_int(col, default):
+        if existing_row is None:
+            return default
+        return safe_int(existing_row.get(col), default)
+
+    def row_text(col, default=""):
+        if existing_row is None:
+            return default
+        return safe_text(existing_row.get(col))
+
+    # データなしの場合：数値項目は0を基本にする。
+    # ただし食事摂取率は現場入力しやすいように80を初期値にする。
+    default_temp = 0.0 if existing_row is None else row_float("体温", 36.5)
+    default_bp_high = 0 if existing_row is None else row_int("血圧上", 120)
+    default_bp_low = 0 if existing_row is None else row_int("血圧下", 75)
+    default_pulse = 0 if existing_row is None else row_int("脈拍", 70)
+    default_spo2 = 0 if existing_row is None else row_int("SpO2", 96)
+    default_weight = 0.0 if existing_row is None else row_float("体重", 50.0)
+
+    with st.form("health_form", clear_on_submit=False):
         st.divider()
         st.subheader("バイタル")
 
@@ -2071,27 +1988,27 @@ elif menu == "健康チェック入力":
         with col4:
             temp = st.number_input(
                 "体温",
-                min_value=30.0,
+                min_value=0.0,
                 max_value=45.0,
-                value=36.5,
+                value=default_temp,
                 step=0.1,
             )
 
         with col5:
             bp_high = st.number_input(
                 "血圧上",
-                min_value=50,
+                min_value=0,
                 max_value=250,
-                value=120,
+                value=default_bp_high,
                 step=1,
             )
 
         with col6:
             bp_low = st.number_input(
                 "血圧下",
-                min_value=30,
+                min_value=0,
                 max_value=150,
-                value=75,
+                value=default_bp_low,
                 step=1,
             )
 
@@ -2100,18 +2017,18 @@ elif menu == "健康チェック入力":
         with col7:
             pulse = st.number_input(
                 "脈拍",
-                min_value=30,
+                min_value=0,
                 max_value=200,
-                value=70,
+                value=default_pulse,
                 step=1,
             )
 
         with col8:
             spo2 = st.number_input(
                 "SpO2",
-                min_value=70,
+                min_value=0,
                 max_value=100,
-                value=96,
+                value=default_spo2,
                 step=1,
             )
 
@@ -2120,7 +2037,7 @@ elif menu == "健康チェック入力":
                 "体重",
                 min_value=0.0,
                 max_value=200.0,
-                value=50.0,
+                value=default_weight,
                 step=0.1,
             )
 
@@ -2130,25 +2047,45 @@ elif menu == "健康チェック入力":
         meal1, meal2, meal3 = st.columns(3)
 
         with meal1:
-            breakfast = st.slider("朝食", 0, 100, 80, step=10)
+            breakfast = st.slider(
+                "朝食",
+                0,
+                100,
+                row_int("朝食摂取率", 80),
+                step=10,
+            )
 
         with meal2:
-            lunch = st.slider("昼食", 0, 100, 80, step=10)
+            lunch = st.slider(
+                "昼食",
+                0,
+                100,
+                row_int("昼食摂取率", 80),
+                step=10,
+            )
 
         with meal3:
-            dinner = st.slider("夕食", 0, 100, 80, step=10)
+            dinner = st.slider(
+                "夕食",
+                0,
+                100,
+                row_int("夕食摂取率", 80),
+                step=10,
+            )
 
         st.divider()
-        urine_count, stool_count, excretion_data = build_excretion_inputs()
+        urine_count, stool_count, excretion_data = build_excretion_inputs(existing_row)
 
         st.divider()
         family_memo = st.text_area(
             "家族共有メモ",
+            value=row_text("家族共有メモ"),
             placeholder="ご家族へ共有してよい内容を入力",
         )
 
         changes = st.text_area(
             "気になる変化",
+            value=row_text("気になる変化"),
             placeholder="食事、睡眠、歩行、表情、体調、排泄状況など",
         )
 
@@ -2178,6 +2115,7 @@ elif menu == "健康チェック入力":
 
         action = upsert_record(record)
         st.success(f"{action}しました。記録日＋利用者名をキーに、排泄詳細も保存されています。")
+        st.rerun()
 
 
 # =========================
