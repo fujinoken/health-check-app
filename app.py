@@ -50,7 +50,7 @@ def login_check():
     st.markdown(
         """
         <div style='text-align:center; padding:24px;'>
-            <h1 style='color:#2E7D32;'>健康チェック管理システム</h1>
+            <h1 style='color:#2E7D32;'>ひだまり 健康チェック管理システム</h1>
             <p style='color:#666;'>利用者様の健康記録を安全に管理します</p>
         </div>
         """,
