@@ -250,6 +250,11 @@ def load_data():
 
 def save_data(df):
     ensure_dirs()
+    df = df.copy()
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    df = df[COLUMNS]
     df.to_excel(DATA_FILE, index=False, sheet_name=SHEET_NAME)
 
 
@@ -262,6 +267,30 @@ def append_record(record):
 
 def to_number(series):
     return pd.to_numeric(series, errors="coerce")
+
+
+def safe_float(value, default):
+    try:
+        if pd.isna(value) or value == "":
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def safe_int(value, default):
+    try:
+        if pd.isna(value) or value == "":
+            return default
+        return int(float(value))
+    except Exception:
+        return default
+
+
+def safe_text(value):
+    if pd.isna(value):
+        return ""
+    return str(value)
 
 
 # =========================
@@ -429,7 +458,7 @@ def create_family_report(df, user_name, year, month):
 # アプリ本体
 # =========================
 st.title("健康チェックWebアプリ")
-st.caption("入力はブラウザで、データはExcelへ保存。月別の家族向けレポートを出力できます。")
+st.caption("入力はブラウザで、データはExcelへ保存。過去データの検索・更新・削除、月別の家族向けレポート出力ができます。")
 
 ensure_data_file()
 ensure_user_file()
@@ -437,12 +466,12 @@ ensure_user_file()
 
 # =========================
 # サイドバーメニュー
-# ※ここは1回だけ
 # =========================
 menu = st.sidebar.radio(
     "メニュー",
     [
         "健康チェック入力",
+        "過去データ管理",
         "入力データ確認",
         "家族向けレポート作成",
         "利用者マスタ管理",
@@ -568,6 +597,232 @@ if menu == "健康チェック入力":
 
         append_record(record)
         st.success("登録しました。Excelデータに保存されています。")
+
+
+# =========================
+# 過去データ管理
+# 検索・更新・削除
+# =========================
+elif menu == "過去データ管理":
+    st.header("過去データ管理")
+    st.caption("過去に登録した健康チェック記録を検索し、修正・削除できます。")
+
+    df = load_data()
+
+    if df.empty:
+        st.info("まだ登録データがありません。")
+        st.stop()
+
+    df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
+
+    # 元のExcel上の行番号を管理IDとして保持
+    df = df.reset_index(drop=False)
+    df = df.rename(columns={"index": "管理ID"})
+
+    st.subheader("検索条件")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        search_user = st.selectbox(
+            "利用者名",
+            ["全員"] + all_users,
+        )
+
+    with col2:
+        search_year = st.number_input(
+            "年",
+            min_value=2024,
+            max_value=2035,
+            value=date.today().year,
+            step=1,
+        )
+
+    with col3:
+        search_month = st.number_input(
+            "月",
+            min_value=1,
+            max_value=12,
+            value=date.today().month,
+            step=1,
+        )
+
+    search_text = st.text_input(
+        "メモ検索",
+        placeholder="家族共有メモ・気になる変化・入力者から検索できます",
+    )
+
+    result = df.copy()
+
+    result = result[
+        (result["記録日"].dt.year == int(search_year))
+        & (result["記録日"].dt.month == int(search_month))
+    ]
+
+    if search_user != "全員":
+        result = result[result["利用者名"] == search_user]
+
+    if search_text.strip():
+        keyword = search_text.strip()
+        result = result[
+            result["家族共有メモ"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
+            | result["気になる変化"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
+            | result["入力者"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
+        ]
+
+    st.subheader("検索結果")
+    st.dataframe(result, use_container_width=True)
+
+    if result.empty:
+        st.warning("該当するデータがありません。")
+        st.stop()
+
+    st.divider()
+
+    st.subheader("データの更新・削除")
+
+    selected_id = st.selectbox(
+        "修正・削除する管理IDを選択",
+        result["管理ID"].tolist(),
+    )
+
+    selected_row = df[df["管理ID"] == selected_id].iloc[0]
+
+    with st.expander("選択中のデータを確認する", expanded=True):
+        st.dataframe(
+            pd.DataFrame([selected_row]),
+            use_container_width=True,
+        )
+
+    with st.form("edit_record_form"):
+        edit_date = st.date_input(
+            "記録日",
+            value=selected_row["記録日"].date()
+            if pd.notna(selected_row["記録日"])
+            else date.today(),
+        )
+
+        edit_user = st.selectbox(
+            "利用者名",
+            all_users,
+            index=all_users.index(selected_row["利用者名"])
+            if selected_row["利用者名"] in all_users
+            else 0,
+        )
+
+        col4, col5, col6 = st.columns(3)
+
+        with col4:
+            edit_temp = st.number_input(
+                "体温",
+                min_value=30.0,
+                max_value=45.0,
+                value=safe_float(selected_row["体温"], 36.5),
+                step=0.1,
+            )
+
+        with col5:
+            edit_bp_high = st.number_input(
+                "血圧上",
+                min_value=50,
+                max_value=250,
+                value=safe_int(selected_row["血圧上"], 120),
+                step=1,
+            )
+
+        with col6:
+            edit_bp_low = st.number_input(
+                "血圧下",
+                min_value=30,
+                max_value=150,
+                value=safe_int(selected_row["血圧下"], 75),
+                step=1,
+            )
+
+        col7, col8, col9 = st.columns(3)
+
+        with col7:
+            edit_pulse = st.number_input(
+                "脈拍",
+                min_value=30,
+                max_value=200,
+                value=safe_int(selected_row["脈拍"], 70),
+                step=1,
+            )
+
+        with col8:
+            edit_spo2 = st.number_input(
+                "SpO2",
+                min_value=70,
+                max_value=100,
+                value=safe_int(selected_row["SpO2"], 96),
+                step=1,
+            )
+
+        with col9:
+            edit_weight = st.number_input(
+                "体重",
+                min_value=0.0,
+                max_value=200.0,
+                value=safe_float(selected_row["体重"], 50.0),
+                step=0.1,
+            )
+
+        edit_family_memo = st.text_area(
+            "家族共有メモ",
+            value=safe_text(selected_row["家族共有メモ"]),
+        )
+
+        edit_changes = st.text_area(
+            "気になる変化",
+            value=safe_text(selected_row["気になる変化"]),
+        )
+
+        edit_staff = st.text_input(
+            "入力者",
+            value=safe_text(selected_row["入力者"]),
+        )
+
+        update_submit = st.form_submit_button("この内容で更新する")
+
+    if update_submit:
+        original_df = load_data()
+
+        original_df.loc[selected_id, "記録日"] = edit_date
+        original_df.loc[selected_id, "利用者名"] = edit_user
+        original_df.loc[selected_id, "体温"] = edit_temp
+        original_df.loc[selected_id, "血圧上"] = edit_bp_high
+        original_df.loc[selected_id, "血圧下"] = edit_bp_low
+        original_df.loc[selected_id, "脈拍"] = edit_pulse
+        original_df.loc[selected_id, "SpO2"] = edit_spo2
+        original_df.loc[selected_id, "体重"] = edit_weight
+        original_df.loc[selected_id, "家族共有メモ"] = edit_family_memo
+        original_df.loc[selected_id, "気になる変化"] = edit_changes
+        original_df.loc[selected_id, "入力者"] = edit_staff
+        original_df.loc[selected_id, "登録日時"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        save_data(original_df)
+
+        st.success("データを更新しました。")
+        st.rerun()
+
+    st.divider()
+
+    st.subheader("データ削除")
+    st.warning("削除すると元に戻せません。必要に応じて先にExcelをダウンロードしてください。")
+
+    delete_check = st.checkbox("このデータを削除することを確認しました")
+
+    if st.button("選択したデータを削除する"):
+        if not delete_check:
+            st.error("削除する場合は確認チェックを入れてください。")
+        else:
+            original_df = load_data()
+            original_df = original_df.drop(index=selected_id).reset_index(drop=True)
+            save_data(original_df)
+
+            st.success("データを削除しました。")
+            st.rerun()
 
 
 # =========================
