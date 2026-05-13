@@ -210,9 +210,9 @@ EXCRETION_SLOTS = [
 ]
 
 URINE_AMOUNT_OPTIONS = ["なし", "少", "中", "大"]
-URINE_TYPE_OPTIONS = ["普通尿", "濃縮尿"]
+URINE_TYPE_OPTIONS = ["なし", "普通尿", "濃縮尿"]
 STOOL_AMOUNT_OPTIONS = ["なし", "少", "中", "大"]
-STOOL_TYPE_OPTIONS = ["普通便", "下痢便", "水様便"]
+STOOL_TYPE_OPTIONS = ["なし", "普通便", "下痢便", "水様便"]
 
 
 COLUMNS = [
@@ -579,9 +579,9 @@ def build_excretion_inputs(existing_row=None):
         )
 
         urine_amount_default = get_existing_value(f"{slot}尿量", "なし")
-        urine_type_default = get_existing_value(f"{slot}尿性状", "普通尿")
+        urine_type_default = get_existing_value(f"{slot}尿性状", "なし")
         stool_amount_default = get_existing_value(f"{slot}便量", "なし")
-        stool_type_default = get_existing_value(f"{slot}便性状", "普通便")
+        stool_type_default = get_existing_value(f"{slot}便性状", "なし")
 
         urine_amount = st.selectbox(
             f"{slot} 尿量",
