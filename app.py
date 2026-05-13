@@ -50,7 +50,7 @@ def login_check():
     st.markdown(
         """
         <div style='text-align:center; padding:24px;'>
-            <h1 style='color:#2E7D32;'>ひだまり 健康チェック管理システム</h1>
+            <h1 style='color:#2E7D32;'>健康チェック管理システム</h1>
             <p style='color:#666;'>利用者様の健康記録を安全に管理します</p>
         </div>
         """,
@@ -441,27 +441,50 @@ def safe_text(value):
 def build_excretion_inputs():
     """時系列で排泄状況を入力し、合計回数と詳細データを返す。"""
     st.subheader("排泄状況")
-    st.caption("9時〜17時は午前・午後・夕方、18時〜翌8時は夜・深夜・朝方で記録します。")
+    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。")
 
     excretion_data = {}
     urine_count = 0
     stool_count = 0
 
-    st.markdown("#### 日中帯（9時〜17時）")
+    st.markdown("#### ☀️ 日中帯（9時〜17時）")
     day_cols = st.columns(3)
 
     for col, slot_info in zip(day_cols, EXCRETION_SLOTS[:3]):
         slot, time_label = slot_info
         with col:
             st.markdown(
-                f"<div style='background:#FFF7EC; padding:10px; border-radius:12px; border:1px solid #E5D5BF; margin-bottom:8px;'><b>{slot}</b><br><span style='font-size:12px; color:#666;'>{time_label}</span></div>",
+                f"""
+                <div style='background:#FFF7EC; padding:12px; border-radius:14px; border:1px solid #E5D5BF; margin-bottom:10px;'>
+                    <b style='font-size:16px;'>{slot}</b><br>
+                    <span style='font-size:12px; color:#666;'>{time_label}</span>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
-            urine_amount = st.selectbox(f"{slot} 尿量", URINE_AMOUNT_OPTIONS, key=f"{slot}_urine_amount")
-            urine_type = st.selectbox(f"{slot} 尿性状", URINE_TYPE_OPTIONS, key=f"{slot}_urine_type", disabled=(urine_amount == "なし"))
-            stool_amount = st.selectbox(f"{slot} 便量", STOOL_AMOUNT_OPTIONS, key=f"{slot}_stool_amount")
-            stool_type = st.selectbox(f"{slot} 便性状", STOOL_TYPE_OPTIONS, key=f"{slot}_stool_type", disabled=(stool_amount == "なし"))
+            urine_amount = st.selectbox(
+                f"{slot} 尿量",
+                URINE_AMOUNT_OPTIONS,
+                key=f"{slot}_urine_amount",
+            )
+            urine_type = st.selectbox(
+                f"{slot} 尿性状",
+                URINE_TYPE_OPTIONS,
+                key=f"{slot}_urine_type",
+                disabled=(urine_amount == "なし"),
+            )
+            stool_amount = st.selectbox(
+                f"{slot} 便量",
+                STOOL_AMOUNT_OPTIONS,
+                key=f"{slot}_stool_amount",
+            )
+            stool_type = st.selectbox(
+                f"{slot} 便性状",
+                STOOL_TYPE_OPTIONS,
+                key=f"{slot}_stool_type",
+                disabled=(stool_amount == "なし"),
+            )
 
             excretion_data[f"{slot}尿量"] = urine_amount
             excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
@@ -473,21 +496,44 @@ def build_excretion_inputs():
             if stool_amount != "なし":
                 stool_count += 1
 
-    st.markdown("#### 夜間帯（18時〜翌8時）")
+    st.markdown("#### 🌙 夜間帯（18時〜翌8時）")
     night_cols = st.columns(3)
 
     for col, slot_info in zip(night_cols, EXCRETION_SLOTS[3:]):
         slot, time_label = slot_info
         with col:
             st.markdown(
-                f"<div style='background:#EEF4FA; padding:10px; border-radius:12px; border:1px solid #C9D8E6; margin-bottom:8px;'><b>{slot}</b><br><span style='font-size:12px; color:#666;'>{time_label}</span></div>",
+                f"""
+                <div style='background:#EEF4FA; padding:12px; border-radius:14px; border:1px solid #C9D8E6; margin-bottom:10px;'>
+                    <b style='font-size:16px;'>{slot}</b><br>
+                    <span style='font-size:12px; color:#666;'>{time_label}</span>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
-            urine_amount = st.selectbox(f"{slot} 尿量", URINE_AMOUNT_OPTIONS, key=f"{slot}_urine_amount")
-            urine_type = st.selectbox(f"{slot} 尿性状", URINE_TYPE_OPTIONS, key=f"{slot}_urine_type", disabled=(urine_amount == "なし"))
-            stool_amount = st.selectbox(f"{slot} 便量", STOOL_AMOUNT_OPTIONS, key=f"{slot}_stool_amount")
-            stool_type = st.selectbox(f"{slot} 便性状", STOOL_TYPE_OPTIONS, key=f"{slot}_stool_type", disabled=(stool_amount == "なし"))
+            urine_amount = st.selectbox(
+                f"{slot} 尿量",
+                URINE_AMOUNT_OPTIONS,
+                key=f"{slot}_urine_amount",
+            )
+            urine_type = st.selectbox(
+                f"{slot} 尿性状",
+                URINE_TYPE_OPTIONS,
+                key=f"{slot}_urine_type",
+                disabled=(urine_amount == "なし"),
+            )
+            stool_amount = st.selectbox(
+                f"{slot} 便量",
+                STOOL_AMOUNT_OPTIONS,
+                key=f"{slot}_stool_amount",
+            )
+            stool_type = st.selectbox(
+                f"{slot} 便性状",
+                STOOL_TYPE_OPTIONS,
+                key=f"{slot}_stool_type",
+                disabled=(stool_amount == "なし"),
+            )
 
             excretion_data[f"{slot}尿量"] = urine_amount
             excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
@@ -500,7 +546,6 @@ def build_excretion_inputs():
                 stool_count += 1
 
     st.info(f"自動集計：排尿 {urine_count} 回 ／ 排便 {stool_count} 回")
-
     return urine_count, stool_count, excretion_data
 
 
@@ -510,7 +555,6 @@ def build_excretion_summary_text(target):
         return ""
 
     lines = []
-
     for _, row in target.iterrows():
         date_text = row["記録日"].strftime("%m/%d") if pd.notna(row.get("記録日")) else ""
         slot_notes = []
@@ -1746,7 +1790,7 @@ elif menu == "健康チェック入力":
 
     if st.session_state.role == "staff":
         st.markdown("### お疲れ様です。")
-        st.write("利用者様の今日の健康状態を、わかる範囲で落ち着いて入力してください。")
+        st.write("利用者様の今日の健康状態を、時系列でわかりやすく入力してください。")
 
     if not active_users:
         st.stop()
@@ -1762,6 +1806,9 @@ elif menu == "健康チェック入力":
 
         with col3:
             input_staff = st.text_input("入力者", placeholder="例：藤野")
+
+        st.divider()
+        st.subheader("バイタル")
 
         col4, col5, col6 = st.columns(3)
 
@@ -1821,9 +1868,7 @@ elif menu == "健康チェック入力":
                 step=0.1,
             )
 
-
         st.divider()
-
         st.subheader("食事摂取率")
 
         meal1, meal2, meal3 = st.columns(3)
@@ -1838,29 +1883,9 @@ elif menu == "健康チェック入力":
             dinner = st.slider("夕食", 0, 100, 80, step=10)
 
         st.divider()
+        urine_count, stool_count, excretion_data = build_excretion_inputs()
 
-        st.subheader("排泄状況")
-
-        toilet1, toilet2 = st.columns(2)
-
-        with toilet1:
-            urine_count = st.number_input(
-                "排尿回数",
-                min_value=0,
-                max_value=30,
-                value=5,
-                step=1,
-            )
-
-        with toilet2:
-            stool_count = st.number_input(
-                "排便回数",
-                min_value=0,
-                max_value=10,
-                value=0,
-                step=1,
-            )
-
+        st.divider()
         family_memo = st.text_area(
             "家族共有メモ",
             placeholder="ご家族へ共有してよい内容を入力",
@@ -1868,7 +1893,7 @@ elif menu == "健康チェック入力":
 
         changes = st.text_area(
             "気になる変化",
-            placeholder="食事、睡眠、歩行、表情、体調など",
+            placeholder="食事、睡眠、歩行、表情、体調、排泄状況など",
         )
 
         submitted = st.form_submit_button("登録する")
@@ -1883,13 +1908,12 @@ elif menu == "健康チェック入力":
             "脈拍": pulse,
             "SpO2": spo2,
             "体重": weight,
-
             "朝食摂取率": breakfast,
             "昼食摂取率": lunch,
             "夕食摂取率": dinner,
-
             "排尿回数": urine_count,
             "排便回数": stool_count,
+            **excretion_data,
             "家族共有メモ": family_memo,
             "気になる変化": changes,
             "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
