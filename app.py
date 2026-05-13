@@ -438,6 +438,94 @@ def build_assessment_context_text(user_name):
     return "\n".join(parts)
 
 
+def build_assessment_report_text(user_name):
+    """家族向け・PDF向けに、アセスメント情報をやわらかく要約する。"""
+    assessment = get_user_assessment(user_name)
+
+    if not assessment:
+        return "現在、アセスメント情報は未登録です。今後の記録とあわせて、生活全体の様子を確認していきます。"
+
+    lines = []
+
+    complaint = assessment.get("主訴", "")
+    life = assessment.get("生活状況", "")
+    adl = assessment.get("ADL", "")
+    iadl = assessment.get("IADL", "")
+    cognitive = assessment.get("認知機能", "")
+    health = assessment.get("健康状態", "")
+    issue = assessment.get("課題", "")
+    support = assessment.get("支援内容", "")
+
+    if complaint:
+        lines.append("ご本人・ご家族のご希望や困りごととして、" + complaint)
+
+    if life:
+        lines.append("日々の生活状況として、" + life)
+
+    care_points = []
+    if adl:
+        care_points.append("ADL：" + adl)
+    if iadl:
+        care_points.append("IADL：" + iadl)
+    if cognitive:
+        care_points.append("認知機能：" + cognitive)
+    if health:
+        care_points.append("健康状態：" + health)
+
+    if care_points:
+        lines.append("見守りの視点として、" + "／".join(care_points))
+
+    if issue:
+        lines.append("支援上の課題として、" + issue)
+
+    if support:
+        lines.append("現在の支援内容として、" + support)
+
+    if not lines:
+        return "アセスメント情報は登録されていますが、家族向けに表示する内容はまだ整理中です。"
+
+    lines.append("これらの背景情報をふまえ、日々の健康記録・食事・排泄・ご様子をあわせて確認しています。")
+
+    return "\n\n".join(lines)
+
+
+def build_admin_assessment_analysis(user_name, target):
+    """管理者支援用：アセスメントと月間記録を組み合わせた確認視点を作成する。"""
+    assessment_text = build_assessment_context_text(user_name)
+
+    if target.empty:
+        record_text = "対象月の健康チェック記録はありません。"
+    else:
+        low_meal_count = 0
+        for col in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+            if col in target.columns:
+                low_meal_count += int((to_number(target[col]) <= 50).sum())
+
+        no_stool_days = 0
+        if "排便回数" in target.columns:
+            no_stool_days = int((to_number(target["排便回数"]).fillna(0) == 0).sum())
+
+        memo_count = int((target["気になる変化"].fillna("").astype(str).str.strip() != "").sum())
+
+        record_text = (
+            f"対象月の記録件数：{len(target)}件\n"
+            f"食事摂取率50％以下の記録：{low_meal_count}件\n"
+            f"排便0回の日数：{no_stool_days}日\n"
+            f"気になる変化の記録：{memo_count}件"
+        )
+
+    return (
+        "【アセスメント情報】\n"
+        + (assessment_text if assessment_text else "未登録")
+        + "\n\n【月間記録から見える確認点】\n"
+        + record_text
+        + "\n\n【管理者確認の視点】\n"
+        "・アセスメント上の課題と、実際の記録にずれがないか確認してください。\n"
+        "・食事摂取率、排便状況、気になる変化が、ADL・認知機能・健康状態と関係していないか確認してください。\n"
+        "・医療判断ではなく、職員間の共有と見守り方針の整理に使ってください。"
+    )
+
+
 def get_month_data(df, user_name, year, month):
     work = df.copy()
     work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
@@ -462,11 +550,11 @@ def create_family_summary_text(target, user_name, year, month):
         "この文章は医療的な判断ではなく、日々の健康チェック記録をもとにした共有です。"
     )
 
-    assessment_context = build_assessment_context_text(user_name)
-    if assessment_context:
+    assessment_report_text = build_assessment_report_text(user_name)
+    if assessment_report_text:
         lines.append(
-            "利用者様の背景情報として、以下の内容を参考にしています。\n"
-            + assessment_context
+            "アセスメント情報もふまえた見守りの視点です。\n"
+            + assessment_report_text
         )
 
     temp_mean = to_number(target["体温"]).mean()
@@ -813,7 +901,18 @@ def create_family_report(df, user_name, year, month):
     ws["A15"].fill = summary_fill
     ws["A15"].alignment = Alignment(wrap_text=True, vertical="top")
 
-    row = 22
+    ws.merge_cells("A22:H22")
+    ws["A22"] = "アセスメントに基づく見守りの視点"
+    ws["A22"].font = Font(name="Meiryo", bold=True)
+    ws["A22"].fill = section_fill
+
+    assessment_report_text = build_assessment_report_text(user_name)
+    ws.merge_cells("A23:H27")
+    ws["A23"] = assessment_report_text
+    ws["A23"].fill = summary_fill
+    ws["A23"].alignment = Alignment(wrap_text=True, vertical="top")
+
+    row = 29
     ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
     ws.cell(row=row, column=1).value = "日付別のご様子（家族共有メモ）"
     ws.cell(row=row, column=1).font = Font(name="Meiryo", bold=True)
@@ -1236,6 +1335,11 @@ def create_hidamari_report_pdf(df, user_name, year, month):
         story.append(Spacer(1, 5))
 
     story.append(Spacer(1, 8))
+    story.append(section_line("アセスメントに基づく見守りの視点"))
+    assessment_report_text = build_assessment_report_text(user_name)
+    story.append(make_note_box(assessment_report_text))
+    story.append(Spacer(1, 8))
+
     story.append(section_line("健康状態の目安"))
 
     metrics = [
@@ -2009,12 +2113,13 @@ elif menu == "管理者支援":
 
     df = load_data()
 
-    tab1, tab2, tab3, tab4 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
         [
             "AI家族レポート",
             "バイタル推移グラフ",
             "ChatGPT連携",
             "申し送り支援",
+            "アセスメント分析",
         ]
     )
 
@@ -2034,6 +2139,13 @@ elif menu == "管理者支援":
             target = get_month_data(df, ai_user, ai_year, ai_month)
             summary = create_family_summary_text(target, ai_user, ai_year, ai_month)
             st.text_area("家族向け文章", value=summary, height=300)
+
+            st.subheader("基軸となるアセスメント情報")
+            st.text_area(
+                "AIが参照する背景情報",
+                value=build_assessment_context_text(ai_user),
+                height=220,
+            )
 
     with tab2:
         st.subheader("バイタル推移グラフ")
@@ -2088,7 +2200,7 @@ elif menu == "管理者支援":
 利用者名：{prompt_user}
 対象月：{prompt_year}年{prompt_month}月
 
-【アセスメント情報】
+【基軸となるアセスメント情報】
 {build_assessment_context_text(prompt_user)}
 
 【記録データ】
@@ -2101,6 +2213,62 @@ elif menu == "管理者支援":
         handover_date = st.date_input("申し送り対象日", value=date.today())
         handover = create_handover_text(df, handover_date)
         st.text_area("申し送りまとめ", value=handover, height=360)
+
+
+    with tab5:
+        st.subheader("アセスメント分析")
+        st.caption("利用者マスタのアセスメント情報と月間記録を組み合わせ、管理者が確認すべき視点を整理します。")
+
+        if not all_users:
+            st.warning("利用者が登録されていません。")
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                assess_user = st.selectbox("利用者", all_users, key="assess_user")
+            with col2:
+                assess_year = st.number_input(
+                    "対象年",
+                    min_value=2024,
+                    max_value=2035,
+                    value=date.today().year,
+                    step=1,
+                    key="assess_year",
+                )
+            with col3:
+                assess_month = st.number_input(
+                    "対象月",
+                    min_value=1,
+                    max_value=12,
+                    value=date.today().month,
+                    step=1,
+                    key="assess_month",
+                )
+
+            assess_target = get_month_data(df, assess_user, assess_year, assess_month)
+            analysis_text = build_admin_assessment_analysis(assess_user, assess_target)
+
+            st.text_area("管理者確認メモ", value=analysis_text, height=420)
+
+            prompt_text = f"""あなたは介護施設の管理者支援を行う文章整理係です。
+以下のアセスメント情報と月間記録をもとに、職員間で共有しやすい確認ポイントを整理してください。
+
+【重要ルール】
+・医療判断、診断、治療効果の断定はしない。
+・本人や職員を責める表現にしない。
+・事実、背景、確認すべき点、支援の方向性を分ける。
+・ADL、IADL、認知機能、食事、排泄、気になる変化を関連づけて整理する。
+
+【利用者】
+{assess_user}
+
+【アセスメント情報】
+{build_assessment_context_text(assess_user)}
+
+【月間記録】
+{assess_target.to_string(index=False)}
+"""
+            st.text_area("ChatGPT連携用プロンプト", value=prompt_text, height=460)
+
 
 
 # =========================
