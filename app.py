@@ -860,6 +860,7 @@ def create_hidamari_report_pdf(df, user_name, year, month):
         textColor=ink,
         spaceAfter=3,
     )
+    # 温かみのあるモダンデザイン
     subtitle_style = ParagraphStyle(
         "jp_subtitle_modern",
         parent=styles["Normal"],
@@ -906,43 +907,114 @@ def create_hidamari_report_pdf(df, user_name, year, month):
     )
 
     def line_art_header():
-        """表紙用の線画イラスト。太陽・家・草花を線だけで表現。"""
-        d = Drawing(500, 92)
+        """季節感のある、引き算ベースの温かい線画ヘッダー。"""
+        d = Drawing(500, 96)
 
-        # 上下の細線
-        d.add(Line(0, 83, 500, 83, strokeColor=light_gray, strokeWidth=0.8))
-        d.add(Line(0, 8, 500, 8, strokeColor=light_gray, strokeWidth=0.8))
+        # 背景の淡い帯
+        d.add(Rect(0, 0, 500, 96,
+                   fillColor=colors.HexColor("#FCFAF5"),
+                   strokeColor=None))
 
-        # 太陽の線画
-        d.add(Circle(58, 47, 16, fillColor=None, strokeColor=ink, strokeWidth=1.1))
+        # 上下ライン
+        d.add(Line(0, 84, 500, 84,
+                   strokeColor=colors.HexColor("#DDD7CC"),
+                   strokeWidth=0.8))
+
+        d.add(Line(0, 10, 500, 10,
+                   strokeColor=colors.HexColor("#DDD7CC"),
+                   strokeWidth=0.8))
+
+        # 季節の太陽
+        d.add(Circle(
+            62, 50, 16,
+            fillColor=colors.HexColor("#FFF6E8"),
+            strokeColor=colors.HexColor("#B68A5A"),
+            strokeWidth=0.9
+        ))
+
         for x1, y1, x2, y2 in [
-            (58, 75, 58, 66), (58, 28, 58, 19),
-            (31, 47, 42, 47), (74, 47, 86, 47),
-            (39, 66, 46, 59), (77, 66, 70, 59),
-            (39, 28, 46, 35), (77, 28, 70, 35),
+            (62, 76, 62, 68),
+            (62, 31, 62, 23),
+            (37, 50, 46, 50),
+            (78, 50, 88, 50),
+            (45, 67, 51, 61),
+            (79, 67, 73, 61),
+            (45, 33, 51, 39),
+            (79, 33, 73, 39),
         ]:
-            d.add(Line(x1, y1, x2, y2, strokeColor=ink, strokeWidth=0.9))
+            d.add(Line(
+                x1, y1, x2, y2,
+                strokeColor=colors.HexColor("#B68A5A"),
+                strokeWidth=0.8
+            ))
 
-        # 家の線画
-        d.add(Polygon([380, 35, 425, 66, 470, 35], fillColor=None, strokeColor=ink, strokeWidth=1.2))
-        d.add(Rect(392, 22, 66, 34, fillColor=None, strokeColor=ink, strokeWidth=1.2))
-        d.add(Rect(420, 22, 12, 22, fillColor=None, strokeColor=ink, strokeWidth=1.0))
-        d.add(Rect(402, 38, 11, 10, fillColor=None, strokeColor=ink, strokeWidth=0.8))
-        d.add(Rect(438, 38, 11, 10, fillColor=None, strokeColor=ink, strokeWidth=0.8))
+        # 家
+        d.add(Polygon(
+            [382, 36, 425, 67, 468, 36],
+            fillColor=colors.HexColor("#FAF7F1"),
+            strokeColor=colors.HexColor("#5C5C5C"),
+            strokeWidth=1.0
+        ))
 
-        # 草花の線画
-        for x, y in [(150, 26), (170, 32), (190, 25)]:
-            d.add(Line(x, 18, x, y + 12, strokeColor=accent, strokeWidth=0.8))
-            d.add(Circle(x - 5, y + 8, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
-            d.add(Circle(x + 5, y + 8, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
-            d.add(Circle(x, y + 14, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
+        d.add(Rect(
+            394, 23, 62, 33,
+            fillColor=colors.white,
+            strokeColor=colors.HexColor("#5C5C5C"),
+            strokeWidth=1.0
+        ))
 
-        # 小さな道
+        d.add(Rect(
+            420, 23, 12, 21,
+            fillColor=colors.HexColor("#F7F1E7"),
+            strokeColor=colors.HexColor("#5C5C5C"),
+            strokeWidth=0.8
+        ))
+
+        # 季節の植物
+        flower_colors = [
+            "#D8A48F",
+            "#A7BFA3",
+            "#E7C9A9",
+            "#CBB8A9",
+        ]
+
+        flower_positions = [(150, 24), (170, 30), (192, 24), (212, 29)]
+
+        for i, (x, y) in enumerate(flower_positions):
+
+            d.add(Line(
+                x, 18, x, y + 12,
+                strokeColor=colors.HexColor("#8A9A7B"),
+                strokeWidth=0.7
+            ))
+
+            d.add(Circle(
+                x - 4, y + 8, 3.8,
+                fillColor=colors.HexColor(flower_colors[i % len(flower_colors)]),
+                strokeColor=colors.HexColor("#7A7A7A"),
+                strokeWidth=0.3
+            ))
+
+            d.add(Circle(
+                x + 4, y + 8, 3.8,
+                fillColor=colors.HexColor(flower_colors[(i+1) % len(flower_colors)]),
+                strokeColor=colors.HexColor("#7A7A7A"),
+                strokeWidth=0.3
+            ))
+
+            d.add(Circle(
+                x, y + 14, 3.8,
+                fillColor=colors.HexColor(flower_colors[(i+2) % len(flower_colors)]),
+                strokeColor=colors.HexColor("#7A7A7A"),
+                strokeWidth=0.3
+            ))
+
+        # ゆるやかな道
         path = Path()
-        path.moveTo(245, 17)
-        path.curveTo(260, 34, 282, 45, 310, 52)
+        path.moveTo(240, 18)
+        path.curveTo(260, 32, 285, 42, 320, 48)
         d.add(path)
-        d.contents[-1].strokeColor = light_gray
+        d.contents[-1].strokeColor = colors.HexColor("#D5CEC3")
         d.contents[-1].strokeWidth = 1.0
         d.contents[-1].fillColor = None
 
