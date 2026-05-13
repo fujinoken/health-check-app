@@ -1106,33 +1106,66 @@ elif menu == "入力データ確認":
         st.stop()
 
     st.header("入力データ確認")
+    st.caption("管理者用：利用者・年・月・日で入力データを絞り込みできます。")
+
     df = load_data()
 
     filter_options = ["全員"] + all_users
-    col1, col2, col3 = st.columns(3)
+
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         filter_user = st.selectbox("利用者で絞り込み", filter_options)
 
     with col2:
-        year = st.number_input("年", min_value=2024, max_value=2035, value=date.today().year, step=1)
+        year = st.number_input(
+            "年",
+            min_value=2024,
+            max_value=2035,
+            value=date.today().year,
+            step=1,
+        )
 
     with col3:
-        month = st.number_input("月", min_value=1, max_value=12, value=date.today().month, step=1)
+        month = st.number_input(
+            "月",
+            min_value=1,
+            max_value=12,
+            value=date.today().month,
+            step=1,
+        )
+
+    with col4:
+        day_filter = st.selectbox(
+            "日",
+            ["全日"] + list(range(1, 32)),
+        )
 
     view = df.copy()
 
     if not view.empty:
         view["記録日"] = pd.to_datetime(view["記録日"], errors="coerce")
+
         view = view[
             (view["記録日"].dt.year == int(year))
             & (view["記録日"].dt.month == int(month))
         ]
 
+        if day_filter != "全日":
+            view = view[view["記録日"].dt.day == int(day_filter)]
+
         if filter_user != "全員":
             view = view[view["利用者名"] == filter_user]
 
-    st.dataframe(view, use_container_width=True)
+        view = view.sort_values(["記録日", "利用者名"], ascending=[True, True])
+
+    st.subheader("検索結果")
+
+    if view.empty:
+        st.warning("該当するデータがありません。")
+    else:
+        st.write(f"該当件数：{len(view)}件")
+        st.dataframe(view, use_container_width=True, hide_index=True)
 
     with open(DATA_FILE, "rb") as f:
         st.download_button(
