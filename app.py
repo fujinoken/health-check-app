@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import hashlib
+import json
 from pathlib import Path
 from datetime import date, datetime
 from openpyxl import Workbook
@@ -194,6 +195,8 @@ ASSESSMENT_COLUMNS = [
     "朝方尿性状",
     "朝方便量",
     "朝方便性状",
+    "排泄詳細テキスト",
+    "排泄詳細JSON",
     "家族共有メモ",
     "気になる変化",
     "登録日時",
@@ -397,6 +400,10 @@ def load_data():
                 if col in df.columns:
                     df[col] = df[col].fillna("").astype(str)
 
+        for col in ["排泄詳細テキスト", "排泄詳細JSON"]:
+            if col in df.columns:
+                df[col] = df[col].fillna("").astype(str)
+
     return df.astype("object")
 
 
@@ -493,6 +500,16 @@ def upsert_record(record):
     """記録日＋利用者名をキーにして、なければ登録、あれば更新する。
     文字列項目と数値項目が混在するため、更新前にobject型へ変換する。
     """
+    # 排泄詳細は介護上重要な情報なので、個別列・テキスト・JSONの3形態で必ず保存する
+    excretion_data_for_save = {}
+    for slot, _ in EXCRETION_SLOTS:
+        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+            col = f"{slot}{suffix}"
+            excretion_data_for_save[col] = record.get(col, "")
+
+    record["排泄詳細テキスト"] = build_excretion_detail_text_from_dict(excretion_data_for_save)
+    record["排泄詳細JSON"] = build_excretion_detail_json_from_dict(excretion_data_for_save)
+
     df = load_data()
     df = normalize_key_columns(df)
 
@@ -559,6 +576,68 @@ def safe_text(value):
 
 
 
+
+def build_excretion_detail_text_from_dict(excretion_data):
+    """排泄詳細dictを、人が読める時系列テキストにする。"""
+    lines = []
+
+    for slot, time_label in EXCRETION_SLOTS:
+        urine_amount = str(excretion_data.get(f"{slot}尿量", "なし") or "なし")
+        urine_type = str(excretion_data.get(f"{slot}尿性状", "") or "")
+        stool_amount = str(excretion_data.get(f"{slot}便量", "なし") or "なし")
+        stool_type = str(excretion_data.get(f"{slot}便性状", "") or "")
+
+        parts = []
+
+        if urine_amount != "なし":
+            parts.append(f"尿：{urine_amount}" + (f"・{urine_type}" if urine_type else ""))
+        else:
+            parts.append("尿：なし")
+
+        if stool_amount != "なし":
+            parts.append(f"便：{stool_amount}" + (f"・{stool_type}" if stool_type else ""))
+        else:
+            parts.append("便：なし")
+
+        lines.append(f"{slot}（{time_label}） " + "／".join(parts))
+
+    return "\n".join(lines)
+
+
+def build_excretion_detail_json_from_dict(excretion_data):
+    """排泄詳細dictをJSON文字列として保存する。"""
+    try:
+        return json.dumps(excretion_data, ensure_ascii=False)
+    except Exception:
+        return "{}"
+
+
+def restore_excretion_data_from_row(row):
+    """既存行から排泄詳細をdictとして復元する。個別列を優先し、JSONも補助的に使う。"""
+    data = {}
+
+    # JSONがあれば先に読む
+    try:
+        raw = row.get("排泄詳細JSON", "")
+        if raw and not pd.isna(raw):
+            loaded = json.loads(str(raw))
+            if isinstance(loaded, dict):
+                data.update(loaded)
+    except Exception:
+        pass
+
+    # 個別列を優先して上書き
+    for slot, _ in EXCRETION_SLOTS:
+        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+            col = f"{slot}{suffix}"
+            value = row.get(col, "")
+            if pd.isna(value) or str(value).lower() == "nan":
+                value = ""
+            data[col] = str(value)
+
+    return data
+
+
 def build_excretion_key_signature(existing_row):
     """排泄詳細の保存値から、画面表示用の短い署名を作る。
     これをWidget keyに含めることで、既存データがある場合に保存値を確実に初期表示する。
@@ -602,14 +681,15 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
     urine_count = 0
     stool_count = 0
 
+    existing_excretion_data = {}
+    if existing_row is not None:
+        existing_excretion_data = restore_excretion_data_from_row(existing_row)
+
     def get_existing_value(col_name, default):
         if existing_row is None:
             return default
 
-        try:
-            value = existing_row.get(col_name, default)
-        except Exception:
-            return default
+        value = existing_excretion_data.get(col_name, default)
 
         if pd.isna(value) or value == "" or str(value).lower() == "nan":
             return default
@@ -2175,6 +2255,8 @@ elif menu == "健康チェック入力":
             "排尿回数": urine_count,
             "排便回数": stool_count,
             **excretion_data,
+            "排泄詳細テキスト": build_excretion_detail_text_from_dict(excretion_data),
+            "排泄詳細JSON": build_excretion_detail_json_from_dict(excretion_data),
             "家族共有メモ": family_memo,
             "気になる変化": changes,
             "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2324,6 +2406,7 @@ elif menu == "過去データ管理":
             "朝方尿性状",
             "朝方便量",
             "朝方便性状",
+            "排泄詳細テキスト",
         ]
         visible_cols = [c for c in excretion_cols if c in result.columns]
         with st.expander("排泄詳細だけを確認する", expanded=False):
@@ -2492,6 +2575,8 @@ elif menu == "過去データ管理":
                 "排尿回数": edit_urine_count,
                 "排便回数": edit_stool_count,
                 **edit_excretion_data,
+                "排泄詳細テキスト": build_excretion_detail_text_from_dict(edit_excretion_data),
+                "排泄詳細JSON": build_excretion_detail_json_from_dict(edit_excretion_data),
                 "家族共有メモ": edit_family_memo,
                 "気になる変化": edit_changes,
                 "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
