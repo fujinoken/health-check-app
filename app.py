@@ -451,20 +451,29 @@ def normalize_key_columns(df):
 
 
 def find_record_index(df, record_date, user_name):
-    """記録日＋利用者名で既存データのindexを探す。"""
+    """記録日＋利用者名で既存データのindexを探す。
+    日付は年月日だけで比較し、時間部分は無視する。
+    """
     if df.empty:
         return None
 
     work = df.copy()
     work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
-    target_key = make_record_key(record_date, user_name)
+    work["利用者名"] = work["利用者名"].astype(str).str.strip()
 
-    keys = work.apply(
-        lambda row: make_record_key(row["記録日"], row["利用者名"]),
-        axis=1,
+    target_date = pd.to_datetime(record_date, errors="coerce")
+    if pd.isna(target_date):
+        return None
+
+    target_date_value = target_date.date()
+    target_user = str(user_name).strip()
+
+    mask = (
+        (work["記録日"].dt.date == target_date_value)
+        & (work["利用者名"] == target_user)
     )
 
-    matches = work.index[keys == target_key].tolist()
+    matches = work.index[mask].tolist()
 
     if not matches:
         return None
@@ -2032,10 +2041,27 @@ elif menu == "健康チェック入力":
 
         existing_df = load_data()
         existing_idx = find_record_index(existing_df, record_date, user_name)
+
         if existing_idx is None:
-            st.info("この記録日・利用者名のデータは未登録です。登録すると新規保存されます。")
+            st.markdown(
+                """
+                <div style='background:#EAF4FF; border:1px solid #9CC7F0; color:#174A7C; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
+                    <b>この記録日・利用者名のデータはありません。</b><br>
+                    登録すると新規データとして保存されます。
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         else:
-            st.warning("この記録日・利用者名のデータは既にあります。登録すると上書き更新されます。")
+            st.markdown(
+                """
+                <div style='background:#FFF3E0; border:1px solid #F0B36A; color:#8A4B00; padding:12px 14px; border-radius:10px; margin:8px 0 12px 0;'>
+                    <b>この記録日・利用者名のデータは既にあります。</b><br>
+                    登録すると上書き更新されます。
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         st.divider()
         st.subheader("バイタル")
@@ -2201,7 +2227,7 @@ elif menu == "過去データ管理":
 
     if search_key_button:
         if key_idx is None:
-            st.warning("この記録日・利用者名のデータは見つかりません。")
+            st.info("この記録日・利用者名のデータはありません。")
         else:
             st.success("該当データが見つかりました。下の更新フォームで編集できます。")
 
