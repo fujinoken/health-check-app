@@ -535,6 +535,148 @@ def build_excretion_inputs():
 
     return urine_count, stool_count, excretion_data
 
+
+def build_excretion_admin_summary(df, active_users, target_start, target_end):
+    """管理者向け：排泄詳細を集計し、状況把握用データを返す。"""
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    work = df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+
+    work = work[
+        (work["記録日"].dt.date >= target_start)
+        & (work["記録日"].dt.date <= target_end)
+    ].copy()
+
+    if work.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    summary_rows = []
+
+    for user in active_users:
+        user_df = work[work["利用者名"] == user].copy()
+
+        if user_df.empty:
+            summary_rows.append(
+                {
+                    "利用者名": user,
+                    "記録日数": 0,
+                    "排尿回数合計": 0,
+                    "排便回数合計": 0,
+                    "排便なし日数": 0,
+                    "濃縮尿記録": 0,
+                    "下痢便記録": 0,
+                    "水様便記録": 0,
+                    "注意メモ": "記録なし",
+                }
+            )
+            continue
+
+        urine_total = int(to_number(user_df["排尿回数"]).fillna(0).sum())
+        stool_total = int(to_number(user_df["排便回数"]).fillna(0).sum())
+        no_stool_days = int((to_number(user_df["排便回数"]).fillna(0) == 0).sum())
+
+        concentrated_urine = 0
+        diarrhea = 0
+        watery = 0
+
+        for slot, _ in EXCRETION_SLOTS:
+            urine_type_col = f"{slot}尿性状"
+            stool_type_col = f"{slot}便性状"
+
+            if urine_type_col in user_df.columns:
+                concentrated_urine += int((user_df[urine_type_col].fillna("") == "濃縮尿").sum())
+
+            if stool_type_col in user_df.columns:
+                diarrhea += int((user_df[stool_type_col].fillna("") == "下痢便").sum())
+                watery += int((user_df[stool_type_col].fillna("") == "水様便").sum())
+
+        notes = []
+        if no_stool_days >= 3:
+            notes.append("排便なし日数が多い")
+        if concentrated_urine > 0:
+            notes.append("濃縮尿あり")
+        if diarrhea > 0:
+            notes.append("下痢便あり")
+        if watery > 0:
+            notes.append("水様便あり")
+
+        summary_rows.append(
+            {
+                "利用者名": user,
+                "記録日数": len(user_df),
+                "排尿回数合計": urine_total,
+                "排便回数合計": stool_total,
+                "排便なし日数": no_stool_days,
+                "濃縮尿記録": concentrated_urine,
+                "下痢便記録": diarrhea,
+                "水様便記録": watery,
+                "注意メモ": "、".join(notes) if notes else "大きな注意記録なし",
+            }
+        )
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    detail_cols = [
+        "記録日",
+        "利用者名",
+        "排尿回数",
+        "排便回数",
+    ]
+
+    for slot, _ in EXCRETION_SLOTS:
+        detail_cols.extend(
+            [
+                f"{slot}尿量",
+                f"{slot}尿性状",
+                f"{slot}便量",
+                f"{slot}便性状",
+            ]
+        )
+
+    detail_cols = [col for col in detail_cols if col in work.columns]
+    detail_df = work[detail_cols].sort_values(["記録日", "利用者名"])
+
+    alert_rows = []
+
+    for _, row in work.iterrows():
+        alerts = []
+
+        if safe_int(row.get("排便回数"), 0) == 0:
+            alerts.append("排便なし")
+
+        for slot, _ in EXCRETION_SLOTS:
+            urine_amount = safe_text(row.get(f"{slot}尿量", ""))
+            urine_type = safe_text(row.get(f"{slot}尿性状", ""))
+            stool_amount = safe_text(row.get(f"{slot}便量", ""))
+            stool_type = safe_text(row.get(f"{slot}便性状", ""))
+
+            if urine_type == "濃縮尿":
+                alerts.append(f"{slot}：濃縮尿")
+            if stool_type in ["下痢便", "水様便"]:
+                alerts.append(f"{slot}：{stool_type}")
+            if stool_amount == "大":
+                alerts.append(f"{slot}：便量大")
+            if urine_amount == "大":
+                alerts.append(f"{slot}：尿量大")
+
+        if alerts:
+            alert_rows.append(
+                {
+                    "記録日": row.get("記録日"),
+                    "利用者名": row.get("利用者名"),
+                    "確認内容": "、".join(alerts),
+                    "気になる変化": row.get("気になる変化", ""),
+                    "入力者": row.get("入力者", ""),
+                }
+            )
+
+    alert_df = pd.DataFrame(alert_rows)
+
+    return summary_df, detail_df, alert_df
+
+
 def build_excretion_summary_text(target):
     """排泄詳細を家族向け・管理者向けに簡潔にまとめる。"""
     if target.empty:
@@ -1719,6 +1861,7 @@ if st.session_state.role == "admin":
         "家族向けレポート作成",
         "ひだまりレポートPDF",
         "管理者支援",
+        "排泄詳細管理",
         "利用者マスタ管理",
     ]
 else:
@@ -2478,6 +2621,114 @@ elif menu == "管理者支援":
 {assess_target.to_string(index=False)}
 """
             st.text_area("ChatGPT連携用プロンプト", value=prompt_text, height=460)
+
+
+
+# =========================
+# 排泄詳細管理
+# =========================
+elif menu == "排泄詳細管理":
+    if st.session_state.role != "admin":
+        st.error("この画面は管理者専用です。")
+        st.stop()
+
+    st.header("排泄詳細管理")
+    st.caption("日中帯・夜間帯の排泄詳細を集計し、管理者が状況を把握するための画面です。")
+
+    df = load_data()
+
+    if df.empty:
+        st.info("まだ登録データがありません。")
+        st.stop()
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        ex_user = st.selectbox("利用者", ["全員"] + all_users, key="ex_user")
+
+    with col2:
+        start_date = st.date_input(
+            "開始日",
+            value=date.today(),
+            key="ex_start_date",
+        )
+
+    with col3:
+        end_date = st.date_input(
+            "終了日",
+            value=date.today(),
+            key="ex_end_date",
+        )
+
+    target_users = active_users if ex_user == "全員" else [ex_user]
+
+    summary_df, detail_df, alert_df = build_excretion_admin_summary(
+        df,
+        target_users,
+        start_date,
+        end_date,
+    )
+
+    st.subheader("排泄サマリー")
+
+    if summary_df.empty:
+        st.warning("該当する排泄データがありません。")
+    else:
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    st.subheader("注意して確認したい排泄記録")
+
+    if alert_df.empty:
+        st.success("指定期間内に、濃縮尿・下痢便・水様便などの注意記録はありません。")
+    else:
+        st.warning("確認したい排泄記録があります。")
+        st.dataframe(alert_df, use_container_width=True, hide_index=True)
+
+    st.subheader("時系列の排泄詳細")
+
+    if detail_df.empty:
+        st.info("排泄詳細データはありません。")
+    else:
+        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+        csv = detail_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "排泄詳細CSVをダウンロード",
+            data=csv,
+            file_name="排泄詳細データ.csv",
+            mime="text/csv",
+        )
+
+    st.divider()
+    st.subheader("管理者向け確認メモ")
+
+    if summary_df.empty:
+        st.info("確認メモを作成できるデータがありません。")
+    else:
+        memo_lines = [
+            "排泄詳細データをもとにした管理者確認メモです。",
+            "医療判断ではなく、職員間の共有と見守り方針の整理に使用してください。",
+            "",
+        ]
+
+        for _, row in summary_df.iterrows():
+            memo_lines.append(
+                f"■ {row['利用者名']}：排尿{row['排尿回数合計']}回、排便{row['排便回数合計']}回、"
+                f"排便なし日数{row['排便なし日数']}日。{row['注意メモ']}"
+            )
+
+        if not alert_df.empty:
+            memo_lines.append("")
+            memo_lines.append("【確認したい記録】")
+            for _, row in alert_df.head(10).iterrows():
+                date_text = row["記録日"].strftime("%m/%d") if pd.notna(row["記録日"]) else ""
+                memo_lines.append(f"・{date_text} {row['利用者名']}：{row['確認内容']}")
+
+        st.text_area(
+            "確認メモ",
+            value="\\n".join(memo_lines),
+            height=320,
+        )
 
 
 
