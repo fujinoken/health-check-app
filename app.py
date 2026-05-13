@@ -219,6 +219,20 @@ STOOL_AMOUNT_OPTIONS = ["なし", "少", "中", "大"]
 STOOL_TYPE_OPTIONS = ["なし", "普通便", "下痢便", "水様便"]
 
 
+EXCRETION_DETAIL_COLUMNS = []
+for _slot, _ in EXCRETION_SLOTS:
+    EXCRETION_DETAIL_COLUMNS.extend([
+        f"{_slot}尿量",
+        f"{_slot}尿性状",
+        f"{_slot}便量",
+        f"{_slot}便性状",
+    ])
+EXCRETION_DETAIL_COLUMNS.extend([
+    "排泄詳細テキスト",
+    "排泄詳細JSON",
+])
+
+
 COLUMNS = [
     "記録日",
     "利用者名",
@@ -388,19 +402,12 @@ def load_data():
         if col not in df.columns:
             df[col] = ""
 
-    df = df[COLUMNS]
+    df = df[COLUMNS].copy()
 
     if not df.empty:
         df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
 
-        # 排泄詳細は介護上重要な文字列データなので、欠損を空欄に整える
-        for slot, _ in EXCRETION_SLOTS:
-            for suffix in ["尿量", "尿性状", "便量", "便性状"]:
-                col = f"{slot}{suffix}"
-                if col in df.columns:
-                    df[col] = df[col].fillna("").astype(str)
-
-        for col in ["排泄詳細テキスト", "排泄詳細JSON"]:
+        for col in EXCRETION_DETAIL_COLUMNS:
             if col in df.columns:
                 df[col] = df[col].fillna("").astype(str)
 
@@ -409,24 +416,36 @@ def load_data():
 
 def save_data(df):
     ensure_dirs()
+
     df = df.copy()
+
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = ""
+
     df = df[COLUMNS].astype("object")
 
-    # 記録日＋利用者名をキーに重複を整理して保存
-    if "記録日" in df.columns and "利用者名" in df.columns and not df.empty:
+    if not df.empty:
+        # 排泄詳細を保存前に必ず補完
+        fixed_rows = []
+        for _, row in df.iterrows():
+            record = row.to_dict()
+            record = normalize_excretion_record_fields(record)
+            fixed_rows.append(record)
+
+        df = pd.DataFrame(fixed_rows, columns=COLUMNS).astype("object")
+
         df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
         df["利用者名"] = df["利用者名"].astype(str).str.strip()
+
         df["_検索キー"] = df.apply(
             lambda row: make_record_key(row["記録日"], row["利用者名"]),
             axis=1,
-        ) if "make_record_key" in globals() else ""
-        if "_検索キー" in df.columns:
-            df = df[df["_検索キー"] != ""]
-            df = df.drop_duplicates(subset=["_検索キー"], keep="last")
-            df = df.drop(columns=["_検索キー"])
+        )
+
+        df = df[df["_検索キー"] != ""]
+        df = df.drop_duplicates(subset=["_検索キー"], keep="last")
+        df = df.drop(columns=["_検索キー"])
 
     df = df[COLUMNS]
     df.to_excel(DATA_FILE, index=False, sheet_name=SHEET_NAME)
@@ -498,25 +517,12 @@ def find_record_index(df, record_date, user_name):
 
 def upsert_record(record):
     """記録日＋利用者名をキーにして、なければ登録、あれば更新する。
-    文字列項目と数値項目が混在するため、更新前にobject型へ変換する。
+    排泄詳細は個別列・テキスト・JSONの3形態で必ず保存する。
     """
-    # 排泄詳細は介護上重要な情報なので、個別列・テキスト・JSONの3形態で必ず保存する
-    excretion_data_for_save = {}
-    for slot, _ in EXCRETION_SLOTS:
-        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
-            col = f"{slot}{suffix}"
-            excretion_data_for_save[col] = record.get(col, "")
-
-    record["排泄詳細テキスト"] = build_excretion_detail_text_from_dict(excretion_data_for_save)
-    record["排泄詳細JSON"] = build_excretion_detail_json_from_dict(excretion_data_for_save)
+    record = normalize_excretion_record_fields(record)
 
     df = load_data()
     df = normalize_key_columns(df)
-
-    # pandasの型エラー対策：
-    # 既存Excelから読んだ列が数値型になっていると、
-    # 「なし」「普通尿」などの文字列を入れる時にエラーになることがある。
-    # そのため、更新処理前に全列をobject型へ寄せる。
     df = df.astype("object")
 
     idx = find_record_index(
@@ -536,7 +542,6 @@ def upsert_record(record):
             df.at[idx, col] = record.get(col, "")
         action = "更新"
 
-    df = normalize_key_columns(df)
     save_data(df)
 
     return action
@@ -672,10 +677,10 @@ def get_option_index(options, value, default="なし"):
 
 def build_excretion_inputs(existing_row=None, key_prefix=""):
     """時系列で排泄状況を入力し、合計回数と詳細データを返す。
-    既存データがある場合は、その値を確実に初期表示する。
+    既存データがある場合は、保存済みの個別列・JSONから確実に復元して表示する。
     """
     st.subheader("排泄状況")
-    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。既存データがある場合は保存済みの排泄詳細を表示します。")
+    st.caption("排泄の回数・量・性状は健康管理上重要な情報です。保存済みデータがある場合は、その内容を初期表示します。")
 
     excretion_data = {}
     urine_count = 0
@@ -690,11 +695,12 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
             return default
 
         value = existing_excretion_data.get(col_name, default)
+        value = clean_cell_value(value, default)
 
-        if pd.isna(value) or value == "" or str(value).lower() == "nan":
+        if value == "":
             return default
 
-        return str(value)
+        return value
 
     def slot_card(slot, time_label, card_color, border_color):
         nonlocal urine_count, stool_count, excretion_data
@@ -714,9 +720,6 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
         stool_amount_default = get_existing_value(f"{slot}便量", "なし")
         stool_type_default = get_existing_value(f"{slot}便性状", "なし")
 
-        # 保存済み排泄詳細の署名をkeyに含める。
-        # これにより、日付・利用者を変えた時、または保存値が変わった時に
-        # Streamlitの前回入力キャッシュではなく保存データが正しく表示される。
         signature = build_excretion_key_signature(existing_row)
         base_key = f"{key_prefix}_{signature}_{slot}"
 
@@ -748,10 +751,16 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
             key=f"{base_key}_stool_type",
         )
 
+        if urine_amount == "なし":
+            urine_type = "なし"
+
+        if stool_amount == "なし":
+            stool_type = "なし"
+
         excretion_data[f"{slot}尿量"] = urine_amount
-        excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
+        excretion_data[f"{slot}尿性状"] = urine_type
         excretion_data[f"{slot}便量"] = stool_amount
-        excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
+        excretion_data[f"{slot}便性状"] = stool_type
 
         if urine_amount != "なし":
             urine_count += 1
@@ -765,12 +774,7 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
     for col, slot_info in zip(day_cols, EXCRETION_SLOTS[:3]):
         slot, time_label = slot_info
         with col:
-            slot_card(
-                slot=slot,
-                time_label=time_label,
-                card_color="#FFF7EC",
-                border_color="#E5D5BF",
-            )
+            slot_card(slot, time_label, "#FFF7EC", "#E5D5BF")
 
     st.markdown("#### 🌙 夜間帯（18時〜翌8時）")
     night_cols = st.columns(3)
@@ -778,18 +782,18 @@ def build_excretion_inputs(existing_row=None, key_prefix=""):
     for col, slot_info in zip(night_cols, EXCRETION_SLOTS[3:]):
         slot, time_label = slot_info
         with col:
-            slot_card(
-                slot=slot,
-                time_label=time_label,
-                card_color="#EEF4FA",
-                border_color="#C9D8E6",
-            )
+            slot_card(slot, time_label, "#EEF4FA", "#C9D8E6")
 
     st.info(f"自動集計：排尿 {urine_count} 回 ／ 排便 {stool_count} 回")
 
-    with st.expander("保存・更新される排泄詳細を確認する"):
+    with st.expander("保存・更新される排泄詳細を確認する", expanded=False):
         preview = pd.DataFrame([excretion_data])
         st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.text_area(
+            "排泄詳細テキスト",
+            value=build_excretion_detail_text_from_dict(excretion_data),
+            height=180,
+        )
 
     return urine_count, stool_count, excretion_data
 
@@ -957,6 +961,171 @@ def build_admin_assessment_analysis(user_name, target):
         "・食事摂取率、排便状況、気になる変化が、ADL・認知機能・健康状態と関係していないか確認してください。\n"
         "・医療判断ではなく、職員間の共有と見守り方針の整理に使ってください。"
     )
+
+
+# =========================================================
+# 排泄詳細 保存・復元ユーティリティ【強化版】
+# =========================================================
+def clean_cell_value(value, default=""):
+    """Excel/Pandas由来の空値を安全に文字列へ整える。"""
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+
+    value = str(value).strip()
+
+    if value.lower() in ["nan", "none", "nat"]:
+        return default
+
+    return value
+
+
+def build_excretion_detail_text_from_dict(excretion_data):
+    """排泄詳細dictを、人が読める時系列テキストにする。"""
+    lines = []
+
+    for slot, time_label in EXCRETION_SLOTS:
+        urine_amount = clean_cell_value(excretion_data.get(f"{slot}尿量", "なし"), "なし")
+        urine_type = clean_cell_value(excretion_data.get(f"{slot}尿性状", ""), "")
+        stool_amount = clean_cell_value(excretion_data.get(f"{slot}便量", "なし"), "なし")
+        stool_type = clean_cell_value(excretion_data.get(f"{slot}便性状", ""), "")
+
+        parts = []
+
+        if urine_amount != "なし":
+            parts.append(f"尿：{urine_amount}" + (f"・{urine_type}" if urine_type else ""))
+        else:
+            parts.append("尿：なし")
+
+        if stool_amount != "なし":
+            parts.append(f"便：{stool_amount}" + (f"・{stool_type}" if stool_type else ""))
+        else:
+            parts.append("便：なし")
+
+        lines.append(f"{slot}（{time_label}） " + "／".join(parts))
+
+    return "\\n".join(lines)
+
+
+def build_excretion_detail_json_from_dict(excretion_data):
+    """排泄詳細dictをJSON文字列として保存する。"""
+    safe_data = {}
+
+    for slot, _ in EXCRETION_SLOTS:
+        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+            col = f"{slot}{suffix}"
+            safe_data[col] = clean_cell_value(excretion_data.get(col, ""), "")
+
+    return json.dumps(safe_data, ensure_ascii=False)
+
+
+def restore_excretion_data_from_row(row):
+    """既存行から排泄詳細をdictとして復元する。
+    個別列を最優先し、不足分をJSONから補完する。
+    """
+    data = {}
+
+    # まずJSONを読む
+    try:
+        raw = clean_cell_value(row.get("排泄詳細JSON", ""), "")
+        if raw:
+            loaded = json.loads(raw)
+            if isinstance(loaded, dict):
+                for k, v in loaded.items():
+                    data[k] = clean_cell_value(v, "")
+    except Exception:
+        pass
+
+    # 個別列があれば個別列を優先
+    for slot, _ in EXCRETION_SLOTS:
+        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+            col = f"{slot}{suffix}"
+            value = clean_cell_value(row.get(col, ""), "")
+
+            if value != "":
+                data[col] = value
+            elif col not in data:
+                # 量はなし、性状はなしを基本にして画面へ反映
+                data[col] = "なし"
+
+    return data
+
+
+def normalize_excretion_record_fields(record):
+    """record内の排泄詳細を、個別列・テキスト・JSONに必ず揃える。"""
+    excretion_data = {}
+
+    for slot, _ in EXCRETION_SLOTS:
+        urine_amount_col = f"{slot}尿量"
+        urine_type_col = f"{slot}尿性状"
+        stool_amount_col = f"{slot}便量"
+        stool_type_col = f"{slot}便性状"
+
+        urine_amount = clean_cell_value(record.get(urine_amount_col, "なし"), "なし")
+        urine_type = clean_cell_value(record.get(urine_type_col, "なし"), "なし")
+        stool_amount = clean_cell_value(record.get(stool_amount_col, "なし"), "なし")
+        stool_type = clean_cell_value(record.get(stool_type_col, "なし"), "なし")
+
+        if urine_amount == "":
+            urine_amount = "なし"
+        if stool_amount == "":
+            stool_amount = "なし"
+
+        if urine_amount == "なし":
+            urine_type = "なし"
+
+        if stool_amount == "なし":
+            stool_type = "なし"
+
+        excretion_data[urine_amount_col] = urine_amount
+        excretion_data[urine_type_col] = urine_type
+        excretion_data[stool_amount_col] = stool_amount
+        excretion_data[stool_type_col] = stool_type
+
+    for k, v in excretion_data.items():
+        record[k] = v
+
+    record["排泄詳細テキスト"] = build_excretion_detail_text_from_dict(excretion_data)
+    record["排泄詳細JSON"] = build_excretion_detail_json_from_dict(excretion_data)
+
+    # 回数も個別列から再計算する
+    record["排尿回数"] = sum(
+        1 for slot, _ in EXCRETION_SLOTS
+        if clean_cell_value(record.get(f"{slot}尿量", "なし"), "なし") != "なし"
+    )
+
+    record["排便回数"] = sum(
+        1 for slot, _ in EXCRETION_SLOTS
+        if clean_cell_value(record.get(f"{slot}便量", "なし"), "なし") != "なし"
+    )
+
+    return record
+
+
+def build_excretion_key_signature(existing_row):
+    """排泄詳細の保存値から、画面表示用の短い署名を作る。"""
+    if existing_row is None:
+        return "new"
+
+    data = restore_excretion_data_from_row(existing_row)
+    raw = json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
+
+
+def get_option_index(options, value, default="なし"):
+    """プルダウンの安全なindex取得。"""
+    value = clean_cell_value(value, default)
+
+    if value in options:
+        return options.index(value)
+
+    if default in options:
+        return options.index(default)
+
+    return 0
 
 
 def get_month_data(df, user_name, year, month):
