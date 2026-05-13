@@ -164,6 +164,11 @@ COLUMNS = [
     "脈拍",
     "SpO2",
     "体重",
+    "朝食摂取率",
+    "昼食摂取率",
+    "夕食摂取率",
+    "排尿回数",
+    "排便回数",
     "家族共有メモ",
     "気になる変化",
     "登録日時",
@@ -391,6 +396,27 @@ def create_family_summary_text(target, user_name, year, month):
     if not pd.isna(weight_mean):
         health_parts.append(f"体重は平均{round(float(weight_mean), 1)}kg")
 
+
+    breakfast_mean = to_number(target["朝食摂取率"]).mean()
+    lunch_mean = to_number(target["昼食摂取率"]).mean()
+    dinner_mean = to_number(target["夕食摂取率"]).mean()
+
+    urine_mean = to_number(target["排尿回数"]).mean()
+    stool_mean = to_number(target["排便回数"]).mean()
+
+    if not pd.isna(breakfast_mean):
+        lines.append(
+            f"食事摂取率は、朝食平均{round(float(breakfast_mean),1)}％、"
+            f"昼食平均{round(float(lunch_mean),1)}％、"
+            f"夕食平均{round(float(dinner_mean),1)}％でした。"
+        )
+
+    if not pd.isna(urine_mean):
+        lines.append(
+            f"排泄状況は、排尿回数平均{round(float(urine_mean),1)}回、"
+            f"排便回数平均{round(float(stool_mean),1)}回として記録されています。"
+        )
+
     if health_parts:
         lines.append(
             "記録上、" + "、".join(health_parts) + "として確認されています。"
@@ -581,6 +607,41 @@ def show_dashboard(active_users):
 
     st.subheader("注意記録の確認")
     st.caption("目安：体温37.5℃以上、SpO2 93％以下、血圧上160以上。医療判断ではなく、見落とし防止のための確認欄です。")
+
+
+    st.divider()
+    st.subheader("排便アラート")
+
+    constipation_users = []
+
+    for user in active_users:
+
+        user_df = df[df["利用者名"] == user].copy()
+
+        if user_df.empty:
+            continue
+
+        user_df = user_df.sort_values("記録日")
+        recent = user_df.tail(3)
+
+        if len(recent) < 3:
+            continue
+
+        stool_values = pd.to_numeric(
+            recent["排便回数"],
+            errors="coerce"
+        ).fillna(0)
+
+        if (stool_values == 0).all():
+            constipation_users.append(user)
+
+    if constipation_users:
+        st.warning(
+            "未排便が3日続いています：" +
+            "、".join(constipation_users)
+        )
+    else:
+        st.success("未排便3日アラートはありません。")
 
     if alert_rows.empty:
         st.success("本日、設定した注意目安に該当する記録はありません。")
@@ -1406,6 +1467,46 @@ elif menu == "健康チェック入力":
                 step=0.1,
             )
 
+
+        st.divider()
+
+        st.subheader("食事摂取率")
+
+        meal1, meal2, meal3 = st.columns(3)
+
+        with meal1:
+            breakfast = st.slider("朝食", 0, 100, 80, step=10)
+
+        with meal2:
+            lunch = st.slider("昼食", 0, 100, 80, step=10)
+
+        with meal3:
+            dinner = st.slider("夕食", 0, 100, 80, step=10)
+
+        st.divider()
+
+        st.subheader("排泄状況")
+
+        toilet1, toilet2 = st.columns(2)
+
+        with toilet1:
+            urine_count = st.number_input(
+                "排尿回数",
+                min_value=0,
+                max_value=30,
+                value=5,
+                step=1,
+            )
+
+        with toilet2:
+            stool_count = st.number_input(
+                "排便回数",
+                min_value=0,
+                max_value=10,
+                value=0,
+                step=1,
+            )
+
         family_memo = st.text_area(
             "家族共有メモ",
             placeholder="ご家族へ共有してよい内容を入力",
@@ -1428,6 +1529,13 @@ elif menu == "健康チェック入力":
             "脈拍": pulse,
             "SpO2": spo2,
             "体重": weight,
+
+            "朝食摂取率": breakfast,
+            "昼食摂取率": lunch,
+            "夕食摂取率": dinner,
+
+            "排尿回数": urine_count,
+            "排便回数": stool_count,
             "家族共有メモ": family_memo,
             "気になる変化": changes,
             "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1851,7 +1959,7 @@ elif menu == "管理者支援":
             with col1:
                 graph_user = st.selectbox("利用者", all_users, key="graph_user")
             with col2:
-                graph_item = st.selectbox("項目", ["体温", "血圧上", "血圧下", "脈拍", "SpO2", "体重"], key="graph_item")
+                graph_item = st.selectbox("項目", ["体温", "血圧上", "血圧下", "脈拍", "SpO2", "体重", "朝食摂取率", "昼食摂取率", "夕食摂取率", "排尿回数", "排便回数"], key="graph_item")
             with col3:
                 graph_year = st.number_input("年", min_value=2024, max_value=2035, value=date.today().year, step=1, key="graph_year")
             with col4:
