@@ -398,7 +398,7 @@ def save_data(df):
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = ""
-    df = df[COLUMNS]
+    df = df[COLUMNS].astype("object")
 
     # 記録日＋利用者名をキーに重複を整理して保存
     if "記録日" in df.columns and "利用者名" in df.columns and not df.empty:
@@ -447,7 +447,7 @@ def normalize_key_columns(df):
         df = df.drop_duplicates(subset=["_検索キー"], keep="last")
         df = df.drop(columns=["_検索キー"])
 
-    return df[COLUMNS]
+    return df[COLUMNS].astype("object")
 
 
 def find_record_index(df, record_date, user_name):
@@ -482,9 +482,17 @@ def find_record_index(df, record_date, user_name):
 
 
 def upsert_record(record):
-    """記録日＋利用者名をキーにして、なければ登録、あれば更新する。"""
+    """記録日＋利用者名をキーにして、なければ登録、あれば更新する。
+    文字列項目と数値項目が混在するため、更新前にobject型へ変換する。
+    """
     df = load_data()
     df = normalize_key_columns(df)
+
+    # pandasの型エラー対策：
+    # 既存Excelから読んだ列が数値型になっていると、
+    # 「なし」「普通尿」などの文字列を入れる時にエラーになることがある。
+    # そのため、更新処理前に全列をobject型へ寄せる。
+    df = df.astype("object")
 
     idx = find_record_index(
         df,
@@ -493,12 +501,14 @@ def upsert_record(record):
     )
 
     if idx is None:
-        new_df = pd.DataFrame([record], columns=COLUMNS)
+        new_df = pd.DataFrame([record], columns=COLUMNS).astype("object")
         df = pd.concat([df, new_df], ignore_index=True)
         action = "登録"
     else:
         for col in COLUMNS:
-            df.loc[idx, col] = record.get(col, "")
+            if col not in df.columns:
+                df[col] = ""
+            df.at[idx, col] = record.get(col, "")
         action = "更新"
 
     df = normalize_key_columns(df)
