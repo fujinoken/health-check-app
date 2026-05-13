@@ -18,15 +18,31 @@ st.set_page_config(
 
 
 # =========================
-# 簡易ログイン設定
+# ログイン設定
 # =========================
-LOGIN_ID = "hdmr"
-LOGIN_PASSWORD = "rui"
+USERS = {
+    "kanri": {
+        "password": "rui",
+        "role": "admin",
+        "label": "管理者",
+    },
+    "staff": {
+        "password": "rui",
+        "role": "staff",
+        "label": "職員",
+    },
+}
 
 
 def login_check():
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
+
+    if "role" not in st.session_state:
+        st.session_state.role = None
+
+    if "user_label" not in st.session_state:
+        st.session_state.user_label = ""
 
     if st.session_state.logged_in:
         return True
@@ -55,8 +71,12 @@ def login_check():
         input_password = st.text_input("パスワード", type="password")
 
         if st.button("ログイン", use_container_width=True):
-            if input_id == LOGIN_ID and input_password == LOGIN_PASSWORD:
+            user = USERS.get(input_id)
+
+            if user and input_password == user["password"]:
                 st.session_state.logged_in = True
+                st.session_state.role = user["role"]
+                st.session_state.user_label = user["label"]
                 st.rerun()
             else:
                 st.error("IDまたはパスワードが違います。")
@@ -64,9 +84,18 @@ def login_check():
     return False
 
 
+def logout_button():
+    with st.sidebar:
+        st.caption(f"ログイン中：{st.session_state.user_label}")
+        if st.button("ログアウト"):
+            st.session_state.logged_in = False
+            st.session_state.role = None
+            st.session_state.user_label = ""
+            st.rerun()
+
+
 if not login_check():
     st.stop()
-
 
 # =========================
 # 保存先設定
@@ -654,6 +683,8 @@ def create_family_report(df, user_name, year, month):
 # =========================
 # アプリ本体
 # =========================
+logout_button()
+
 st.title("健康チェックWebアプリ")
 st.caption("入力はブラウザで、データはExcelへ保存。管理者ダッシュボード、過去データ管理、家族向けレポート出力ができます。")
 
@@ -663,17 +694,28 @@ ensure_user_file()
 
 # =========================
 # サイドバーメニュー
+# 管理者と職員で表示を分ける
 # =========================
-menu = st.sidebar.radio(
-    "メニュー",
-    [
+if st.session_state.role == "admin":
+    st.sidebar.success("管理者モード")
+    menu_items = [
         "管理者ダッシュボード",
         "健康チェック入力",
         "過去データ管理",
         "入力データ確認",
         "家族向けレポート作成",
         "利用者マスタ管理",
-    ],
+    ]
+else:
+    st.sidebar.info("職員モード")
+    menu_items = [
+        "健康チェック入力",
+        "過去データ管理",
+    ]
+
+menu = st.sidebar.radio(
+    "メニュー",
+    menu_items,
 )
 
 
@@ -683,7 +725,12 @@ all_users = all_users_df["利用者名"].tolist()
 
 
 if not active_users:
-    st.warning("表示中の利用者がいません。左メニューの「利用者マスタ管理」から利用者を追加してください。")
+    st.warning("表示中の利用者がいません。管理者に利用者マスタの確認を依頼してください。")
+
+if st.session_state.role == "staff":
+    st.info("お疲れ様です。今日の健康チェック入力をお願いします。入力後は、必要に応じて過去データ管理から確認・修正できます。")
+elif st.session_state.role == "admin":
+    st.success("管理者としてログインしています。入力状況・注意記録・レポート作成を確認できます。")
 
 
 # =========================
@@ -698,6 +745,10 @@ if menu == "管理者ダッシュボード":
 # =========================
 elif menu == "健康チェック入力":
     st.header("健康チェック入力")
+
+    if st.session_state.role == "staff":
+        st.markdown("### お疲れ様です。")
+        st.write("利用者様の今日の健康状態を、わかる範囲で落ち着いて入力してください。")
 
     if not active_users:
         st.stop()
@@ -811,6 +862,9 @@ elif menu == "健康チェック入力":
 elif menu == "過去データ管理":
     st.header("過去データ管理")
     st.caption("過去に登録した健康チェック記録を検索し、修正・削除できます。")
+
+    if st.session_state.role == "staff":
+        st.info("お疲れ様です。入力内容の確認・修正が必要な場合はこちらから行えます。削除は慎重に行ってください。")
 
     df = load_data()
 
@@ -1034,6 +1088,10 @@ elif menu == "過去データ管理":
 # 入力データ確認
 # =========================
 elif menu == "入力データ確認":
+    if st.session_state.role != "admin":
+        st.error("この画面は管理者専用です。")
+        st.stop()
+
     st.header("入力データ確認")
 
     df = load_data()
@@ -1090,6 +1148,10 @@ elif menu == "入力データ確認":
 # 家族向けレポート作成
 # =========================
 elif menu == "家族向けレポート作成":
+    if st.session_state.role != "admin":
+        st.error("この画面は管理者専用です。")
+        st.stop()
+
     st.header("家族向けレポート作成")
 
     df = load_data()
@@ -1150,6 +1212,10 @@ elif menu == "家族向けレポート作成":
 # 利用者マスタ管理
 # =========================
 elif menu == "利用者マスタ管理":
+    if st.session_state.role != "admin":
+        st.error("この画面は管理者専用です。")
+        st.stop()
+
     st.header("利用者マスタ管理")
     st.caption("利用者の追加・入力候補からの削除ができます。削除しても過去の入力データは残ります。")
 
