@@ -751,16 +751,17 @@ def create_family_report(df, user_name, year, month):
 
 # =========================
 # ひだまりレポートPDF作成
+# 線画・シンプル・モダン版
 # =========================
 def create_chart_image(target, item):
-    """PDFに差し込むバイタル推移グラフ画像を作成する。"""
+    """PDFに差し込むバイタル推移グラフ画像を作成する。線画風のシンプルデザイン。"""
     if target.empty or item not in target.columns:
         return None
 
     chart_df = target[["記録日", item]].copy()
     chart_df["記録日"] = pd.to_datetime(chart_df["記録日"], errors="coerce")
     chart_df[item] = pd.to_numeric(chart_df[item], errors="coerce")
-    chart_df = chart_df.dropna()
+    chart_df = chart_df.dropna().sort_values("記録日")
 
     if chart_df.empty:
         return None
@@ -768,24 +769,39 @@ def create_chart_image(target, item):
     import matplotlib.pyplot as plt
     from io import BytesIO
 
-    fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    ax.plot(chart_df["記録日"], chart_df[item], marker="o")
-    ax.set_title(f"{item}の推移")
-    ax.set_xlabel("日付")
-    ax.set_ylabel(item)
-    ax.grid(True)
-    fig.autofmt_xdate()
+    fig, ax = plt.subplots(figsize=(6.2, 2.15))
+
+    # モダンな線画風：色を抑え、線と余白を優先
+    ax.plot(
+        chart_df["記録日"],
+        chart_df[item],
+        marker="o",
+        linewidth=1.8,
+        markersize=4,
+        color="#2F3437",
+        markerfacecolor="white",
+        markeredgecolor="#2F3437",
+    )
+
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.grid(True, color="#E6E6E6", linewidth=0.7)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#BBBBBB")
+    ax.spines["bottom"].set_color("#BBBBBB")
+    ax.tick_params(axis="both", colors="#555555", labelsize=8)
+    fig.autofmt_xdate(rotation=30)
 
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     buf.seek(0)
     return buf
 
 
 def create_hidamari_report_pdf(df, user_name, year, month):
-    """ご家族向けのPDF『ひだまりレポート』を作成する。"""
-    from io import BytesIO
+    """ご家族向けのPDF『ひだまりレポート』を作成する。線画・シンプル・モダン版。"""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -798,10 +814,11 @@ def create_hidamari_report_pdf(df, user_name, year, month):
         TableStyle,
         Image,
         PageBreak,
+        KeepTogether,
     )
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from reportlab.graphics.shapes import Drawing, Circle, Rect, Polygon, Line
+    from reportlab.graphics.shapes import Drawing, Circle, Rect, Polygon, Line, String, Path
 
     ensure_dirs()
 
@@ -818,86 +835,154 @@ def create_hidamari_report_pdf(df, user_name, year, month):
     doc = SimpleDocTemplate(
         str(pdf_path),
         pagesize=A4,
-        rightMargin=16 * mm,
-        leftMargin=16 * mm,
+        rightMargin=17 * mm,
+        leftMargin=17 * mm,
         topMargin=14 * mm,
         bottomMargin=14 * mm,
     )
 
+    # 色：線画ベース。黒・グレー・淡いベージュのみ
+    ink = colors.HexColor("#2F3437")
+    gray = colors.HexColor("#7A7A7A")
+    light_gray = colors.HexColor("#D9D9D9")
+    pale = colors.HexColor("#F7F4EE")
+    pale2 = colors.HexColor("#FBFAF7")
+    accent = colors.HexColor("#6F7F72")
+
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "jp_title",
+        "jp_title_modern",
         parent=styles["Title"],
         fontName="HeiseiKakuGo-W5",
-        fontSize=22,
-        leading=28,
+        fontSize=24,
+        leading=30,
         alignment=1,
-        textColor=colors.HexColor("#5E7D3A"),
-        spaceAfter=8,
+        textColor=ink,
+        spaceAfter=3,
     )
     subtitle_style = ParagraphStyle(
-        "jp_subtitle",
+        "jp_subtitle_modern",
         parent=styles["Normal"],
-        fontName="HeiseiKakuGo-W5",
-        fontSize=11,
-        leading=16,
+        fontName="HeiseiMin-W3",
+        fontSize=9.8,
+        leading=15,
         alignment=1,
-        textColor=colors.HexColor("#6B6B6B"),
-        spaceAfter=12,
+        textColor=gray,
+        spaceAfter=10,
     )
     h2_style = ParagraphStyle(
-        "jp_h2",
+        "jp_h2_modern",
         parent=styles["Heading2"],
         fontName="HeiseiKakuGo-W5",
-        fontSize=14,
+        fontSize=13.2,
         leading=18,
-        textColor=colors.HexColor("#386641"),
+        textColor=ink,
         spaceBefore=8,
         spaceAfter=6,
     )
     body_style = ParagraphStyle(
-        "jp_body",
+        "jp_body_modern",
         parent=styles["BodyText"],
         fontName="HeiseiMin-W3",
-        fontSize=10.5,
+        fontSize=10.2,
         leading=17,
         textColor=colors.HexColor("#333333"),
     )
     small_style = ParagraphStyle(
-        "jp_small",
+        "jp_small_modern",
         parent=styles["BodyText"],
         fontName="HeiseiMin-W3",
         fontSize=8.5,
         leading=12,
-        textColor=colors.HexColor("#666666"),
+        textColor=gray,
     )
+    label_style = ParagraphStyle(
+        "jp_label_modern",
+        parent=styles["BodyText"],
+        fontName="HeiseiKakuGo-W5",
+        fontSize=9,
+        leading=12,
+        textColor=ink,
+    )
+
+    def line_art_header():
+        """表紙用の線画イラスト。太陽・家・草花を線だけで表現。"""
+        d = Drawing(500, 92)
+
+        # 上下の細線
+        d.add(Line(0, 83, 500, 83, strokeColor=light_gray, strokeWidth=0.8))
+        d.add(Line(0, 8, 500, 8, strokeColor=light_gray, strokeWidth=0.8))
+
+        # 太陽の線画
+        d.add(Circle(58, 47, 16, fillColor=None, strokeColor=ink, strokeWidth=1.1))
+        for x1, y1, x2, y2 in [
+            (58, 75, 58, 66), (58, 28, 58, 19),
+            (31, 47, 42, 47), (74, 47, 86, 47),
+            (39, 66, 46, 59), (77, 66, 70, 59),
+            (39, 28, 46, 35), (77, 28, 70, 35),
+        ]:
+            d.add(Line(x1, y1, x2, y2, strokeColor=ink, strokeWidth=0.9))
+
+        # 家の線画
+        d.add(Polygon([380, 35, 425, 66, 470, 35], fillColor=None, strokeColor=ink, strokeWidth=1.2))
+        d.add(Rect(392, 22, 66, 34, fillColor=None, strokeColor=ink, strokeWidth=1.2))
+        d.add(Rect(420, 22, 12, 22, fillColor=None, strokeColor=ink, strokeWidth=1.0))
+        d.add(Rect(402, 38, 11, 10, fillColor=None, strokeColor=ink, strokeWidth=0.8))
+        d.add(Rect(438, 38, 11, 10, fillColor=None, strokeColor=ink, strokeWidth=0.8))
+
+        # 草花の線画
+        for x, y in [(150, 26), (170, 32), (190, 25)]:
+            d.add(Line(x, 18, x, y + 12, strokeColor=accent, strokeWidth=0.8))
+            d.add(Circle(x - 5, y + 8, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
+            d.add(Circle(x + 5, y + 8, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
+            d.add(Circle(x, y + 14, 4, fillColor=None, strokeColor=accent, strokeWidth=0.8))
+
+        # 小さな道
+        path = Path()
+        path.moveTo(245, 17)
+        path.curveTo(260, 34, 282, 45, 310, 52)
+        d.add(path)
+        d.contents[-1].strokeColor = light_gray
+        d.contents[-1].strokeWidth = 1.0
+        d.contents[-1].fillColor = None
+
+        return d
+
+    def section_line(title):
+        """見出しを線画風に整える。"""
+        d = Drawing(500, 20)
+        d.add(Line(0, 8, 500, 8, strokeColor=light_gray, strokeWidth=0.8))
+        d.add(Circle(5, 8, 3, fillColor=None, strokeColor=ink, strokeWidth=0.8))
+        return KeepTogether([Paragraph(title, h2_style), d])
+
+    def make_note_box(text):
+        box = Table(
+            [[Paragraph(text.replace("\n", "<br/>"), body_style)]],
+            colWidths=[168 * mm],
+        )
+        box.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), pale2),
+                    ("BOX", (0, 0), (-1, -1), 0.6, light_gray),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        return box
 
     story = []
 
-    # やさしいイラスト風の帯
-    drawing = Drawing(500, 72)
-    drawing.add(Rect(0, 0, 500, 72, fillColor=colors.HexColor("#FFF4D9"), strokeColor=colors.HexColor("#E8C78A")))
-    drawing.add(Circle(52, 43, 18, fillColor=colors.HexColor("#FFD56B"), strokeColor=colors.HexColor("#E8B94E")))
-    for x1, y1, x2, y2 in [
-        (52, 68, 52, 61), (52, 25, 52, 18), (27, 43, 35, 43),
-        (69, 43, 78, 43), (36, 58, 41, 53), (68, 58, 63, 53),
-        (36, 28, 41, 33), (68, 28, 63, 33)
-    ]:
-        drawing.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor("#E8B94E"), strokeWidth=1.2))
-
-    # 家のアイコン
-    drawing.add(Polygon([390, 28, 430, 58, 470, 28], fillColor=colors.HexColor("#E07A5F"), strokeColor=colors.HexColor("#C85F45")))
-    drawing.add(Rect(402, 18, 56, 30, fillColor=colors.HexColor("#F2CC8F"), strokeColor=colors.HexColor("#B78B57")))
-    drawing.add(Rect(424, 18, 12, 20, fillColor=colors.HexColor("#8D6E63"), strokeColor=colors.HexColor("#8D6E63")))
-    drawing.add(Circle(128, 45, 6, fillColor=colors.HexColor("#F4A261"), strokeColor=None))
-    drawing.add(Circle(144, 34, 5, fillColor=colors.HexColor("#E76F51"), strokeColor=None))
-    drawing.add(Circle(160, 47, 6, fillColor=colors.HexColor("#90BE6D"), strokeColor=None))
-    drawing.add(Line(130, 20, 160, 50, strokeColor=colors.HexColor("#6A994E"), strokeWidth=1))
-    story.append(drawing)
-    story.append(Spacer(1, 8))
-
+    # 表紙
+    story.append(line_art_header())
+    story.append(Spacer(1, 6))
     story.append(Paragraph("ひだまりレポート", title_style))
     story.append(Paragraph("ご家族へお届けする、月間の健康・生活記録", subtitle_style))
+    story.append(Spacer(1, 6))
 
     info_table = Table(
         [
@@ -910,25 +995,30 @@ def create_hidamari_report_pdf(df, user_name, year, month):
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FAF6EA")),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.2),
+                ("TEXTCOLOR", (0, 0), (-1, -1), ink),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.65, light_gray),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, light_gray),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEADING", (0, 0), (-1, -1), 13),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ]
         )
     )
     story.append(info_table)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 12))
 
-    story.append(Paragraph("今月のまとめ", h2_style))
+    story.append(section_line("今月のまとめ"))
     for paragraph in summary_text.split("\n\n"):
-        story.append(Paragraph(paragraph.replace("\n", "<br/>"), body_style))
+        story.append(make_note_box(paragraph))
         story.append(Spacer(1, 5))
 
     story.append(Spacer(1, 8))
-    story.append(Paragraph("健康状態の目安", h2_style))
+    story.append(section_line("健康状態の目安"))
 
     metrics = [
         ("体温平均", "体温", "℃"),
@@ -948,17 +1038,23 @@ def create_hidamari_report_pdf(df, user_name, year, month):
             value = "" if pd.isna(value) else round(float(value), 1)
         metric_rows.append([label, value, unit])
 
-    metric_table = Table(metric_rows, colWidths=[50 * mm, 45 * mm, 30 * mm])
+    metric_table = Table(metric_rows, colWidths=[58 * mm, 48 * mm, 32 * mm])
     metric_table.setStyle(
         TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEFE2")),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.3),
+                ("TEXTCOLOR", (0, 0), (-1, -1), ink),
+                ("BACKGROUND", (0, 0), (-1, 0), pale),
                 ("BACKGROUND", (0, 1), (-1, -1), colors.white),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B7C9B7")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#B7C9B7")),
+                ("BOX", (0, 0), (-1, -1), 0.65, light_gray),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, light_gray),
                 ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ]
         )
     )
@@ -966,6 +1062,8 @@ def create_hidamari_report_pdf(df, user_name, year, month):
 
     story.append(PageBreak())
 
+    # 2ページ目
+    story.append(line_art_header())
     story.append(Paragraph("バイタル推移グラフ", h2_style))
     story.append(Paragraph("日々の記録をもとに、体調の経過を見える化しています。", body_style))
     story.append(Spacer(1, 6))
@@ -980,64 +1078,93 @@ def create_hidamari_report_pdf(df, user_name, year, month):
     if not chart_buffers:
         story.append(Paragraph("グラフ化できる記録はまだありません。", body_style))
     else:
-        for item, buf in chart_buffers:
-            story.append(Paragraph(item, h2_style))
-            story.append(Image(buf, width=165 * mm, height=58 * mm))
-            story.append(Spacer(1, 6))
+        chart_table_rows = []
+        for i in range(0, len(chart_buffers), 2):
+            cells = []
+            for item, buf in chart_buffers[i:i + 2]:
+                block = [
+                    Paragraph(item, label_style),
+                    Image(buf, width=78 * mm, height=34 * mm),
+                ]
+                cells.append(block)
+            if len(cells) == 1:
+                cells.append("")
+            chart_table_rows.append(cells)
+
+        chart_table = Table(chart_table_rows, colWidths=[83 * mm, 83 * mm])
+        chart_table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOX", (0, 0), (-1, -1), 0.45, light_gray),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.3, light_gray),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        story.append(chart_table)
 
     story.append(PageBreak())
 
+    # 3ページ目
+    story.append(line_art_header())
     story.append(Paragraph("日々のご様子", h2_style))
 
     memo_rows = target[target["家族共有メモ"].fillna("").astype(str).str.strip() != ""] if not target.empty else pd.DataFrame()
     change_rows = target[target["気になる変化"].fillna("").astype(str).str.strip() != ""] if not target.empty else pd.DataFrame()
 
-    story.append(Paragraph("家族共有メモ", h2_style))
-    if memo_rows.empty:
-        story.append(Paragraph("記録された家族共有メモはありません。", body_style))
-    else:
+    def make_record_table(rows_df, value_col, empty_text):
+        if rows_df.empty:
+            return make_note_box(empty_text)
+
         rows = [["日付", "内容"]]
-        for _, rec in memo_rows.iterrows():
-            rows.append([rec["記録日"].strftime("%m/%d"), Paragraph(str(rec["家族共有メモ"]), body_style)])
-        table = Table(rows, colWidths=[22 * mm, 140 * mm])
+        for _, rec in rows_df.iterrows():
+            rows.append(
+                [
+                    rec["記録日"].strftime("%m/%d"),
+                    Paragraph(str(rec[value_col]).replace("\n", "<br/>"), body_style),
+                ]
+            )
+
+        table = Table(rows, colWidths=[24 * mm, 140 * mm])
         table.setStyle(
             TableStyle(
                 [
                     ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
                     ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFF8E7")),
-                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), ink),
+                    ("BACKGROUND", (0, 0), (-1, 0), pale),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                    ("BOX", (0, 0), (-1, -1), 0.65, light_gray),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.35, light_gray),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
                 ]
             )
         )
-        story.append(table)
+        return table
 
-    story.append(Spacer(1, 8))
-    story.append(Paragraph("気になる変化", h2_style))
-    if change_rows.empty:
-        story.append(Paragraph("記録された気になる変化はありません。", body_style))
-    else:
-        rows = [["日付", "内容"]]
-        for _, rec in change_rows.iterrows():
-            rows.append([rec["記録日"].strftime("%m/%d"), Paragraph(str(rec["気になる変化"]), body_style)])
-        table = Table(rows, colWidths=[22 * mm, 140 * mm])
-        table.setStyle(
-            TableStyle(
-                [
-                    ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFF8E7")),
-                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ]
-            )
-        )
-        story.append(table)
+    story.append(section_line("家族共有メモ"))
+    story.append(make_record_table(memo_rows, "家族共有メモ", "記録された家族共有メモはありません。"))
+    story.append(Spacer(1, 10))
 
-    story.append(Spacer(1, 12))
+    story.append(section_line("気になる変化"))
+    story.append(make_record_table(change_rows, "気になる変化", "記録された気になる変化はありません。"))
+
+    story.append(Spacer(1, 14))
+
+    footer_drawing = Drawing(500, 32)
+    footer_drawing.add(Line(0, 22, 500, 22, strokeColor=light_gray, strokeWidth=0.7))
+    footer_drawing.add(Circle(20, 10, 5, fillColor=None, strokeColor=accent, strokeWidth=0.8))
+    footer_drawing.add(Line(25, 10, 65, 10, strokeColor=accent, strokeWidth=0.8))
+    story.append(footer_drawing)
+
     story.append(
         Paragraph(
             "※このレポートは、施設内の健康チェック記録をもとにした共有資料です。医療的な診断・治療効果の判断を行うものではありません。",
@@ -1047,6 +1174,7 @@ def create_hidamari_report_pdf(df, user_name, year, month):
 
     doc.build(story)
     return pdf_path, summary_text, target
+
 
 
 # =========================
