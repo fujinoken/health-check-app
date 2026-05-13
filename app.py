@@ -156,16 +156,63 @@ DEFAULT_USERS = [
 
 
 ASSESSMENT_COLUMNS = [
-    "基本情報",
-    "主訴",
-    "生活状況",
-    "ADL",
-    "IADL",
-    "認知機能",
-    "健康状態",
-    "課題",
-    "支援内容",
+    "記録日",
+    "利用者名",
+    "体温",
+    "血圧上",
+    "血圧下",
+    "脈拍",
+    "SpO2",
+    "体重",
+    "朝食摂取率",
+    "昼食摂取率",
+    "夕食摂取率",
+    "排尿回数",
+    "排便回数",
+    "午前尿量",
+    "午前尿性状",
+    "午前便量",
+    "午前便性状",
+    "午後尿量",
+    "午後尿性状",
+    "午後便量",
+    "午後便性状",
+    "夕方尿量",
+    "夕方尿性状",
+    "夕方便量",
+    "夕方便性状",
+    "夜尿量",
+    "夜尿性状",
+    "夜便量",
+    "夜便性状",
+    "深夜尿量",
+    "深夜尿性状",
+    "深夜便量",
+    "深夜便性状",
+    "朝方尿量",
+    "朝方尿性状",
+    "朝方便量",
+    "朝方便性状",
+    "家族共有メモ",
+    "気になる変化",
+    "登録日時",
+    "入力者",
 ]
+
+
+EXCRETION_SLOTS = [
+    ("午前", "9時〜12時"),
+    ("午後", "12時〜15時"),
+    ("夕方", "15時〜17時"),
+    ("夜", "18時〜22時"),
+    ("深夜", "22時〜5時"),
+    ("朝方", "5時〜8時"),
+]
+
+URINE_AMOUNT_OPTIONS = ["なし", "少", "中", "大"]
+URINE_TYPE_OPTIONS = ["普通尿", "濃縮尿"]
+STOOL_AMOUNT_OPTIONS = ["なし", "少", "中", "大"]
+STOOL_TYPE_OPTIONS = ["普通便", "下痢便", "水様便"]
 
 
 COLUMNS = [
@@ -391,6 +438,104 @@ def safe_text(value):
 
 
 
+def build_excretion_inputs():
+    """時系列で排泄状況を入力し、合計回数と詳細データを返す。"""
+    st.subheader("排泄状況")
+    st.caption("9時〜17時は午前・午後・夕方、18時〜翌8時は夜・深夜・朝方で記録します。")
+
+    excretion_data = {}
+    urine_count = 0
+    stool_count = 0
+
+    st.markdown("#### 日中帯（9時〜17時）")
+    day_cols = st.columns(3)
+
+    for col, slot_info in zip(day_cols, EXCRETION_SLOTS[:3]):
+        slot, time_label = slot_info
+        with col:
+            st.markdown(
+                f"<div style='background:#FFF7EC; padding:10px; border-radius:12px; border:1px solid #E5D5BF; margin-bottom:8px;'><b>{slot}</b><br><span style='font-size:12px; color:#666;'>{time_label}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+            urine_amount = st.selectbox(f"{slot} 尿量", URINE_AMOUNT_OPTIONS, key=f"{slot}_urine_amount")
+            urine_type = st.selectbox(f"{slot} 尿性状", URINE_TYPE_OPTIONS, key=f"{slot}_urine_type", disabled=(urine_amount == "なし"))
+            stool_amount = st.selectbox(f"{slot} 便量", STOOL_AMOUNT_OPTIONS, key=f"{slot}_stool_amount")
+            stool_type = st.selectbox(f"{slot} 便性状", STOOL_TYPE_OPTIONS, key=f"{slot}_stool_type", disabled=(stool_amount == "なし"))
+
+            excretion_data[f"{slot}尿量"] = urine_amount
+            excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
+            excretion_data[f"{slot}便量"] = stool_amount
+            excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
+
+            if urine_amount != "なし":
+                urine_count += 1
+            if stool_amount != "なし":
+                stool_count += 1
+
+    st.markdown("#### 夜間帯（18時〜翌8時）")
+    night_cols = st.columns(3)
+
+    for col, slot_info in zip(night_cols, EXCRETION_SLOTS[3:]):
+        slot, time_label = slot_info
+        with col:
+            st.markdown(
+                f"<div style='background:#EEF4FA; padding:10px; border-radius:12px; border:1px solid #C9D8E6; margin-bottom:8px;'><b>{slot}</b><br><span style='font-size:12px; color:#666;'>{time_label}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+            urine_amount = st.selectbox(f"{slot} 尿量", URINE_AMOUNT_OPTIONS, key=f"{slot}_urine_amount")
+            urine_type = st.selectbox(f"{slot} 尿性状", URINE_TYPE_OPTIONS, key=f"{slot}_urine_type", disabled=(urine_amount == "なし"))
+            stool_amount = st.selectbox(f"{slot} 便量", STOOL_AMOUNT_OPTIONS, key=f"{slot}_stool_amount")
+            stool_type = st.selectbox(f"{slot} 便性状", STOOL_TYPE_OPTIONS, key=f"{slot}_stool_type", disabled=(stool_amount == "なし"))
+
+            excretion_data[f"{slot}尿量"] = urine_amount
+            excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
+            excretion_data[f"{slot}便量"] = stool_amount
+            excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
+
+            if urine_amount != "なし":
+                urine_count += 1
+            if stool_amount != "なし":
+                stool_count += 1
+
+    st.info(f"自動集計：排尿 {urine_count} 回 ／ 排便 {stool_count} 回")
+
+    return urine_count, stool_count, excretion_data
+
+
+def build_excretion_summary_text(target):
+    """排泄詳細を家族向け・管理者向けに簡潔にまとめる。"""
+    if target.empty:
+        return ""
+
+    lines = []
+
+    for _, row in target.iterrows():
+        date_text = row["記録日"].strftime("%m/%d") if pd.notna(row.get("記録日")) else ""
+        slot_notes = []
+
+        for slot, _ in EXCRETION_SLOTS:
+            urine_amount = safe_text(row.get(f"{slot}尿量", ""))
+            urine_type = safe_text(row.get(f"{slot}尿性状", ""))
+            stool_amount = safe_text(row.get(f"{slot}便量", ""))
+            stool_type = safe_text(row.get(f"{slot}便性状", ""))
+
+            notes = []
+            if urine_amount and urine_amount != "なし":
+                notes.append(f"尿{urine_amount}" + (f"・{urine_type}" if urine_type else ""))
+            if stool_amount and stool_amount != "なし":
+                notes.append(f"便{stool_amount}" + (f"・{stool_type}" if stool_type else ""))
+
+            if notes:
+                slot_notes.append(f"{slot}：" + "／".join(notes))
+
+        if slot_notes:
+            lines.append(f"{date_text}　" + "、".join(slot_notes))
+
+    return "\n".join(lines[:10])
+
+
 def get_user_assessment(user_name):
     """利用者マスタからアセスメント情報を取得する。"""
     try:
@@ -590,6 +735,13 @@ def create_family_summary_text(target, user_name, year, month):
             f"排便回数平均{round(float(stool_mean),1)}回として記録されています。"
         )
 
+    excretion_detail = build_excretion_summary_text(target)
+    if excretion_detail:
+        lines.append(
+            "排泄の詳細記録として、以下の内容が確認されています。\n"
+            + excretion_detail
+        )
+
     if health_parts:
         lines.append(
             "記録上、" + "、".join(health_parts) + "として確認されています。"
@@ -679,6 +831,19 @@ def create_handover_text(df, target_date):
             vital_alerts.append("SpO2低め")
         if safe_int(row.get("血圧上"), 0) >= 160:
             vital_alerts.append("血圧上高め")
+
+        excretion_alerts = []
+        for slot, _ in EXCRETION_SLOTS:
+            urine_type = safe_text(row.get(f"{slot}尿性状", ""))
+            stool_type = safe_text(row.get(f"{slot}便性状", ""))
+
+            if urine_type == "濃縮尿":
+                excretion_alerts.append(f"{slot}に濃縮尿")
+            if stool_type in ["下痢便", "水様便"]:
+                excretion_alerts.append(f"{slot}に{stool_type}")
+
+        if excretion_alerts:
+            notes.append("排泄確認：" + "、".join(excretion_alerts[:6]))
 
         if vital_alerts:
             notes.append("確認目安：" + "、".join(vital_alerts))
