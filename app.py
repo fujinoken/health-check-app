@@ -399,14 +399,108 @@ def save_data(df):
         if col not in df.columns:
             df[col] = ""
     df = df[COLUMNS]
+
+    # 記録日＋利用者名をキーに重複を整理して保存
+    if "記録日" in df.columns and "利用者名" in df.columns and not df.empty:
+        df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
+        df["利用者名"] = df["利用者名"].astype(str).str.strip()
+        df["_検索キー"] = df.apply(
+            lambda row: make_record_key(row["記録日"], row["利用者名"]),
+            axis=1,
+        ) if "make_record_key" in globals() else ""
+        if "_検索キー" in df.columns:
+            df = df[df["_検索キー"] != ""]
+            df = df.drop_duplicates(subset=["_検索キー"], keep="last")
+            df = df.drop(columns=["_検索キー"])
+
+    df = df[COLUMNS]
     df.to_excel(DATA_FILE, index=False, sheet_name=SHEET_NAME)
 
 
-def append_record(record):
+def make_record_key(record_date, user_name):
+    """記録日＋利用者名を検索キーとして扱う。"""
+    d = pd.to_datetime(record_date, errors="coerce")
+    if pd.isna(d):
+        return ""
+    return f"{d.strftime('%Y-%m-%d')}__{str(user_name).strip()}"
+
+
+def normalize_key_columns(df):
+    """記録日と利用者名を整え、同じ日の同じ利用者が重複しないようにする。"""
+    df = df.copy()
+
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    if not df.empty:
+        df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
+        df["利用者名"] = df["利用者名"].astype(str).str.strip()
+
+        df["_検索キー"] = df.apply(
+            lambda row: make_record_key(row["記録日"], row["利用者名"]),
+            axis=1,
+        )
+
+        # 同じ「記録日＋利用者名」が複数ある場合は、最後の記録を正式データとして残す
+        df = df[df["_検索キー"] != ""]
+        df = df.drop_duplicates(subset=["_検索キー"], keep="last")
+        df = df.drop(columns=["_検索キー"])
+
+    return df[COLUMNS]
+
+
+def find_record_index(df, record_date, user_name):
+    """記録日＋利用者名で既存データのindexを探す。"""
+    if df.empty:
+        return None
+
+    work = df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+    target_key = make_record_key(record_date, user_name)
+
+    keys = work.apply(
+        lambda row: make_record_key(row["記録日"], row["利用者名"]),
+        axis=1,
+    )
+
+    matches = work.index[keys == target_key].tolist()
+
+    if not matches:
+        return None
+
+    return matches[0]
+
+
+def upsert_record(record):
+    """記録日＋利用者名をキーにして、なければ登録、あれば更新する。"""
     df = load_data()
-    new_df = pd.DataFrame([record], columns=COLUMNS)
-    df = pd.concat([df, new_df], ignore_index=True)
+    df = normalize_key_columns(df)
+
+    idx = find_record_index(
+        df,
+        record["記録日"],
+        record["利用者名"],
+    )
+
+    if idx is None:
+        new_df = pd.DataFrame([record], columns=COLUMNS)
+        df = pd.concat([df, new_df], ignore_index=True)
+        action = "登録"
+    else:
+        for col in COLUMNS:
+            df.loc[idx, col] = record.get(col, "")
+        action = "更新"
+
+    df = normalize_key_columns(df)
     save_data(df)
+
+    return action
+
+
+def append_record(record):
+    """互換用。内部ではupsert_recordを使う。"""
+    return upsert_record(record)
 
 
 def to_number(series):
@@ -1936,6 +2030,13 @@ elif menu == "健康チェック入力":
         with col3:
             input_staff = st.text_input("入力者", placeholder="例：藤野")
 
+        existing_df = load_data()
+        existing_idx = find_record_index(existing_df, record_date, user_name)
+        if existing_idx is None:
+            st.info("この記録日・利用者名のデータは未登録です。登録すると新規保存されます。")
+        else:
+            st.warning("この記録日・利用者名のデータは既にあります。登録すると上書き更新されます。")
+
         st.divider()
         st.subheader("バイタル")
 
@@ -2049,21 +2150,23 @@ elif menu == "健康チェック入力":
             "入力者": input_staff,
         }
 
-        append_record(record)
-        st.success("登録しました。排泄詳細もExcelデータに保存されています。")
+        action = upsert_record(record)
+        st.success(f"{action}しました。記録日＋利用者名をキーに、排泄詳細も保存されています。")
 
 
 # =========================
 # 過去データ管理
+# 記録日＋利用者名を検索キーにした登録・検索・更新・削除
 # =========================
 elif menu == "過去データ管理":
     st.header("過去データ管理")
-    st.caption("過去に登録した健康チェック記録を検索し、修正・削除できます。")
+    st.caption("記録日＋利用者名を検索キーとして、データの検索・更新・削除を行います。")
 
     if st.session_state.role == "staff":
         st.info("お疲れ様です。入力内容の確認・修正が必要な場合はこちらから行えます。削除は慎重に行ってください。")
 
     df = load_data()
+    df = normalize_key_columns(df)
 
     if df.empty:
         st.info("まだ登録データがありません。")
@@ -2071,58 +2174,93 @@ elif menu == "過去データ管理":
 
     df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
 
-    df = df.reset_index(drop=False)
-    df = df.rename(columns={"index": "管理ID"})
-
-    st.subheader("検索条件")
+    st.subheader("検索キー")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        search_user = st.selectbox("利用者名", ["全員"] + all_users)
+        key_date = st.date_input(
+            "記録日",
+            value=date.today(),
+            key="past_key_date",
+        )
 
     with col2:
-        search_year = st.number_input(
+        key_user = st.selectbox(
+            "利用者名",
+            all_users,
+            key="past_key_user",
+        )
+
+    with col3:
+        st.write("")
+        st.write("")
+        search_key_button = st.button("このキーで検索する", use_container_width=True)
+
+    key_idx = find_record_index(df, key_date, key_user)
+
+    if search_key_button:
+        if key_idx is None:
+            st.warning("この記録日・利用者名のデータは見つかりません。")
+        else:
+            st.success("該当データが見つかりました。下の更新フォームで編集できます。")
+
+    st.divider()
+
+    st.subheader("一覧検索")
+
+    col4, col5, col6, col7 = st.columns(4)
+
+    with col4:
+        filter_user = st.selectbox(
+            "利用者で絞り込み",
+            ["全員"] + all_users,
+            key="past_filter_user",
+        )
+
+    with col5:
+        filter_year = st.number_input(
             "年",
             min_value=2024,
             max_value=2035,
             value=date.today().year,
             step=1,
+            key="past_filter_year",
         )
 
-    with col3:
-        search_month = st.number_input(
+    with col6:
+        filter_month = st.number_input(
             "月",
             min_value=1,
             max_value=12,
             value=date.today().month,
             step=1,
+            key="past_filter_month",
         )
 
-    search_text = st.text_input(
-        "メモ検索",
-        placeholder="家族共有メモ・気になる変化・入力者から検索できます",
-    )
+    with col7:
+        filter_day = st.selectbox(
+            "日",
+            ["全日"] + list(range(1, 32)),
+            key="past_filter_day",
+        )
 
     result = df.copy()
     result = result[
-        (result["記録日"].dt.year == int(search_year))
-        & (result["記録日"].dt.month == int(search_month))
+        (result["記録日"].dt.year == int(filter_year))
+        & (result["記録日"].dt.month == int(filter_month))
     ]
 
-    if search_user != "全員":
-        result = result[result["利用者名"] == search_user]
+    if filter_day != "全日":
+        result = result[result["記録日"].dt.day == int(filter_day)]
 
-    if search_text.strip():
-        keyword = search_text.strip()
-        result = result[
-            result["家族共有メモ"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
-            | result["気になる変化"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
-            | result["入力者"].fillna("").astype(str).str.contains(keyword, case=False, na=False)
-        ]
+    if filter_user != "全員":
+        result = result[result["利用者名"] == filter_user]
 
-    st.subheader("検索結果")
-    st.dataframe(result, use_container_width=True)
+    result = result.sort_values(["記録日", "利用者名"])
+
+    st.write(f"該当件数：{len(result)}件")
+    st.dataframe(result, use_container_width=True, hide_index=True)
 
     if not result.empty:
         excretion_cols = [
@@ -2159,94 +2297,196 @@ elif menu == "過去データ管理":
         with st.expander("排泄詳細だけを確認する", expanded=False):
             st.dataframe(result[visible_cols], use_container_width=True, hide_index=True)
 
-    if result.empty:
-        st.warning("該当するデータがありません。")
-        st.stop()
-
     st.divider()
-    st.subheader("データの更新・削除")
 
-    selected_id = st.selectbox("修正・削除する管理IDを選択", result["管理ID"].tolist())
-    selected_row = df[df["管理ID"] == selected_id].iloc[0]
+    st.subheader("更新・削除")
 
-    with st.expander("選択中のデータを確認する", expanded=True):
-        st.dataframe(pd.DataFrame([selected_row]), use_container_width=True)
+    if key_idx is None:
+        st.info("上の検索キーに該当するデータがないため、更新・削除フォームは表示されません。")
+    else:
+        selected_row = df.loc[key_idx]
 
-    with st.form("edit_record_form"):
-        edit_date = st.date_input(
-            "記録日",
-            value=selected_row["記録日"].date() if pd.notna(selected_row["記録日"]) else date.today(),
-        )
+        st.write("選択中の検索キー")
+        st.code(f"{make_record_key(key_date, key_user)}")
 
-        edit_user = st.selectbox(
-            "利用者名",
-            all_users,
-            index=all_users.index(selected_row["利用者名"]) if selected_row["利用者名"] in all_users else 0,
-        )
+        with st.form("key_update_form"):
+            edit_date = st.date_input(
+                "記録日",
+                value=selected_row["記録日"].date() if pd.notna(selected_row["記録日"]) else key_date,
+                key="edit_key_date",
+            )
 
-        col4, col5, col6 = st.columns(3)
+            edit_user = st.selectbox(
+                "利用者名",
+                all_users,
+                index=all_users.index(selected_row["利用者名"]) if selected_row["利用者名"] in all_users else 0,
+                key="edit_key_user",
+            )
 
-        with col4:
-            edit_temp = st.number_input("体温", min_value=30.0, max_value=45.0, value=safe_float(selected_row["体温"], 36.5), step=0.1)
+            st.markdown("#### バイタル")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                edit_temp = st.number_input("体温", min_value=30.0, max_value=45.0, value=safe_float(selected_row["体温"], 36.5), step=0.1)
+            with c2:
+                edit_bp_high = st.number_input("血圧上", min_value=50, max_value=250, value=safe_int(selected_row["血圧上"], 120), step=1)
+            with c3:
+                edit_bp_low = st.number_input("血圧下", min_value=30, max_value=150, value=safe_int(selected_row["血圧下"], 75), step=1)
 
-        with col5:
-            edit_bp_high = st.number_input("血圧上", min_value=50, max_value=250, value=safe_int(selected_row["血圧上"], 120), step=1)
+            c4, c5, c6 = st.columns(3)
+            with c4:
+                edit_pulse = st.number_input("脈拍", min_value=30, max_value=200, value=safe_int(selected_row["脈拍"], 70), step=1)
+            with c5:
+                edit_spo2 = st.number_input("SpO2", min_value=70, max_value=100, value=safe_int(selected_row["SpO2"], 96), step=1)
+            with c6:
+                edit_weight = st.number_input("体重", min_value=0.0, max_value=200.0, value=safe_float(selected_row["体重"], 50.0), step=0.1)
 
-        with col6:
-            edit_bp_low = st.number_input("血圧下", min_value=30, max_value=150, value=safe_int(selected_row["血圧下"], 75), step=1)
+            st.markdown("#### 食事摂取率")
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                edit_breakfast = st.slider("朝食", 0, 100, safe_int(selected_row.get("朝食摂取率"), 80), step=10, key="edit_breakfast")
+            with m2:
+                edit_lunch = st.slider("昼食", 0, 100, safe_int(selected_row.get("昼食摂取率"), 80), step=10, key="edit_lunch")
+            with m3:
+                edit_dinner = st.slider("夕食", 0, 100, safe_int(selected_row.get("夕食摂取率"), 80), step=10, key="edit_dinner")
 
-        col7, col8, col9 = st.columns(3)
+            st.markdown("#### 排泄詳細")
+            edit_excretion_data = {}
+            edit_urine_count = 0
+            edit_stool_count = 0
 
-        with col7:
-            edit_pulse = st.number_input("脈拍", min_value=30, max_value=200, value=safe_int(selected_row["脈拍"], 70), step=1)
+            day_cols = st.columns(3)
+            for col, slot_info in zip(day_cols, EXCRETION_SLOTS[:3]):
+                slot, time_label = slot_info
+                with col:
+                    st.markdown(f"**{slot}**  \n{time_label}")
+                    ua = st.selectbox(
+                        f"{slot} 尿量",
+                        URINE_AMOUNT_OPTIONS,
+                        index=URINE_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿量", "なし"))) if safe_text(selected_row.get(f"{slot}尿量", "なし")) in URINE_AMOUNT_OPTIONS else 0,
+                        key=f"edit_{slot}_ua",
+                    )
+                    ut = st.selectbox(
+                        f"{slot} 尿性状",
+                        URINE_TYPE_OPTIONS,
+                        index=URINE_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿性状", "普通尿"))) if safe_text(selected_row.get(f"{slot}尿性状", "普通尿")) in URINE_TYPE_OPTIONS else 0,
+                        key=f"edit_{slot}_ut",
+                    )
+                    sa = st.selectbox(
+                        f"{slot} 便量",
+                        STOOL_AMOUNT_OPTIONS,
+                        index=STOOL_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}便量", "なし"))) if safe_text(selected_row.get(f"{slot}便量", "なし")) in STOOL_AMOUNT_OPTIONS else 0,
+                        key=f"edit_{slot}_sa",
+                    )
+                    stt = st.selectbox(
+                        f"{slot} 便性状",
+                        STOOL_TYPE_OPTIONS,
+                        index=STOOL_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}便性状", "普通便"))) if safe_text(selected_row.get(f"{slot}便性状", "普通便")) in STOOL_TYPE_OPTIONS else 0,
+                        key=f"edit_{slot}_st",
+                    )
 
-        with col8:
-            edit_spo2 = st.number_input("SpO2", min_value=70, max_value=100, value=safe_int(selected_row["SpO2"], 96), step=1)
+                    edit_excretion_data[f"{slot}尿量"] = ua
+                    edit_excretion_data[f"{slot}尿性状"] = "" if ua == "なし" else ut
+                    edit_excretion_data[f"{slot}便量"] = sa
+                    edit_excretion_data[f"{slot}便性状"] = "" if sa == "なし" else stt
 
-        with col9:
-            edit_weight = st.number_input("体重", min_value=0.0, max_value=200.0, value=safe_float(selected_row["体重"], 50.0), step=0.1)
+                    if ua != "なし":
+                        edit_urine_count += 1
+                    if sa != "なし":
+                        edit_stool_count += 1
 
-        edit_family_memo = st.text_area("家族共有メモ", value=safe_text(selected_row["家族共有メモ"]))
-        edit_changes = st.text_area("気になる変化", value=safe_text(selected_row["気になる変化"]))
-        edit_staff = st.text_input("入力者", value=safe_text(selected_row["入力者"]))
+            night_cols = st.columns(3)
+            for col, slot_info in zip(night_cols, EXCRETION_SLOTS[3:]):
+                slot, time_label = slot_info
+                with col:
+                    st.markdown(f"**{slot}**  \n{time_label}")
+                    ua = st.selectbox(
+                        f"{slot} 尿量",
+                        URINE_AMOUNT_OPTIONS,
+                        index=URINE_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿量", "なし"))) if safe_text(selected_row.get(f"{slot}尿量", "なし")) in URINE_AMOUNT_OPTIONS else 0,
+                        key=f"edit_{slot}_ua",
+                    )
+                    ut = st.selectbox(
+                        f"{slot} 尿性状",
+                        URINE_TYPE_OPTIONS,
+                        index=URINE_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿性状", "普通尿"))) if safe_text(selected_row.get(f"{slot}尿性状", "普通尿")) in URINE_TYPE_OPTIONS else 0,
+                        key=f"edit_{slot}_ut",
+                    )
+                    sa = st.selectbox(
+                        f"{slot} 便量",
+                        STOOL_AMOUNT_OPTIONS,
+                        index=STOOL_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}便量", "なし"))) if safe_text(selected_row.get(f"{slot}便量", "なし")) in STOOL_AMOUNT_OPTIONS else 0,
+                        key=f"edit_{slot}_sa",
+                    )
+                    stt = st.selectbox(
+                        f"{slot} 便性状",
+                        STOOL_TYPE_OPTIONS,
+                        index=STOOL_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}便性状", "普通便"))) if safe_text(selected_row.get(f"{slot}便性状", "普通便")) in STOOL_TYPE_OPTIONS else 0,
+                        key=f"edit_{slot}_st",
+                    )
 
-        update_submit = st.form_submit_button("この内容で更新する")
+                    edit_excretion_data[f"{slot}尿量"] = ua
+                    edit_excretion_data[f"{slot}尿性状"] = "" if ua == "なし" else ut
+                    edit_excretion_data[f"{slot}便量"] = sa
+                    edit_excretion_data[f"{slot}便性状"] = "" if sa == "なし" else stt
 
-    if update_submit:
-        original_df = load_data()
+                    if ua != "なし":
+                        edit_urine_count += 1
+                    if sa != "なし":
+                        edit_stool_count += 1
 
-        original_df.loc[selected_id, "記録日"] = edit_date
-        original_df.loc[selected_id, "利用者名"] = edit_user
-        original_df.loc[selected_id, "体温"] = edit_temp
-        original_df.loc[selected_id, "血圧上"] = edit_bp_high
-        original_df.loc[selected_id, "血圧下"] = edit_bp_low
-        original_df.loc[selected_id, "脈拍"] = edit_pulse
-        original_df.loc[selected_id, "SpO2"] = edit_spo2
-        original_df.loc[selected_id, "体重"] = edit_weight
-        original_df.loc[selected_id, "家族共有メモ"] = edit_family_memo
-        original_df.loc[selected_id, "気になる変化"] = edit_changes
-        original_df.loc[selected_id, "入力者"] = edit_staff
-        original_df.loc[selected_id, "登録日時"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.info(f"自動集計：排尿 {edit_urine_count} 回 ／ 排便 {edit_stool_count} 回")
 
-        save_data(original_df)
-        st.success("データを更新しました。")
-        st.rerun()
+            edit_family_memo = st.text_area("家族共有メモ", value=safe_text(selected_row["家族共有メモ"]))
+            edit_changes = st.text_area("気になる変化", value=safe_text(selected_row["気になる変化"]))
+            edit_staff = st.text_input("入力者", value=safe_text(selected_row["入力者"]))
 
-    st.divider()
-    st.subheader("データ削除")
-    st.warning("削除すると元に戻せません。必要に応じて先にExcelをダウンロードしてください。")
+            update_submit = st.form_submit_button("この内容で更新する")
 
-    delete_check = st.checkbox("このデータを削除することを確認しました")
+        if update_submit:
+            updated_record = {
+                "記録日": edit_date,
+                "利用者名": edit_user,
+                "体温": edit_temp,
+                "血圧上": edit_bp_high,
+                "血圧下": edit_bp_low,
+                "脈拍": edit_pulse,
+                "SpO2": edit_spo2,
+                "体重": edit_weight,
+                "朝食摂取率": edit_breakfast,
+                "昼食摂取率": edit_lunch,
+                "夕食摂取率": edit_dinner,
+                "排尿回数": edit_urine_count,
+                "排便回数": edit_stool_count,
+                **edit_excretion_data,
+                "家族共有メモ": edit_family_memo,
+                "気になる変化": edit_changes,
+                "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "入力者": edit_staff,
+            }
 
-    if st.button("選択したデータを削除する"):
-        if not delete_check:
-            st.error("削除する場合は確認チェックを入れてください。")
-        else:
-            original_df = load_data()
-            original_df = original_df.drop(index=selected_id).reset_index(drop=True)
-            save_data(original_df)
-            st.success("データを削除しました。")
+            action = upsert_record(updated_record)
+            st.success(f"{action}しました。")
             st.rerun()
+
+        st.subheader("削除")
+        st.warning("削除すると元に戻せません。")
+
+        delete_check = st.checkbox("この検索キーのデータを削除することを確認しました")
+
+        if st.button("このデータを削除する"):
+            if not delete_check:
+                st.error("削除する場合は確認チェックを入れてください。")
+            else:
+                original_df = load_data()
+                delete_idx = find_record_index(original_df, key_date, key_user)
+
+                if delete_idx is None:
+                    st.error("削除対象が見つかりません。")
+                else:
+                    original_df = original_df.drop(index=delete_idx).reset_index(drop=True)
+                    save_data(original_df)
+                    st.success("削除しました。")
+                    st.rerun()
 
 
 # =========================
