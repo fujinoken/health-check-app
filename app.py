@@ -293,20 +293,219 @@ def safe_text(value):
     return str(value)
 
 
+def get_month_data(df, user_name, year, month):
+    work = df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+    return work[
+        (work["利用者名"] == user_name)
+        & (work["記録日"].dt.year == int(year))
+        & (work["記録日"].dt.month == int(month))
+    ].sort_values("記録日")
+
+
+def create_family_summary_text(target, user_name, year, month):
+    """家族向けレポートに入れる、やわらかい自然文を作成する。
+    医療判断・診断・改善断定は避け、記録に基づく共有に限定する。
+    """
+    if target.empty:
+        return (
+            f"{user_name}の{year}年{month}月分の記録は、現時点では登録されていません。"
+            "今後の記録をもとに、ご様子を継続して確認していきます。"
+        )
+
+    lines = []
+    record_count = len(target)
+    lines.append(
+        f"{user_name}の{year}年{month}月の記録は、{record_count}件確認されています。"
+        "このレポートは医療的な判断ではなく、日々の健康チェック記録をもとにした共有です。"
+    )
+
+    temp_mean = to_number(target["体温"]).mean()
+    spo2_mean = to_number(target["SpO2"]).mean()
+    weight_mean = to_number(target["体重"]).mean()
+
+    health_parts = []
+    if not pd.isna(temp_mean):
+        health_parts.append(f"体温は平均{round(float(temp_mean), 1)}℃")
+    if not pd.isna(spo2_mean):
+        health_parts.append(f"SpO2は平均{round(float(spo2_mean), 1)}％")
+    if not pd.isna(weight_mean):
+        health_parts.append(f"体重は平均{round(float(weight_mean), 1)}kg")
+
+    if health_parts:
+        lines.append(
+            "記録上、" + "、".join(health_parts) + "として確認されています。"
+            "数値は日々の状態を振り返るための目安として扱っています。"
+        )
+
+    # 注意が必要そうな記録を、断定せずに拾う
+    alerts = []
+    temp_alerts = target[to_number(target["体温"]) >= 37.5]
+    spo2_alerts = target[to_number(target["SpO2"]) <= 93]
+    bp_alerts = target[to_number(target["血圧上"]) >= 160]
+
+    if not temp_alerts.empty:
+        dates = "、".join(temp_alerts["記録日"].dt.strftime("%m/%d").tolist()[:5])
+        alerts.append(f"{dates}に体温が37.5℃以上の記録")
+    if not spo2_alerts.empty:
+        dates = "、".join(spo2_alerts["記録日"].dt.strftime("%m/%d").tolist()[:5])
+        alerts.append(f"{dates}にSpO2が93％以下の記録")
+    if not bp_alerts.empty:
+        dates = "、".join(bp_alerts["記録日"].dt.strftime("%m/%d").tolist()[:5])
+        alerts.append(f"{dates}に血圧上が160以上の記録")
+
+    if alerts:
+        lines.append(
+            "今月は、" + "、".join(alerts) + "がありました。"
+            "一時的な変動の可能性もあるため、引き続き経過を見ながら確認していきます。"
+        )
+    else:
+        lines.append(
+            "記録上、設定した注意目安に該当する大きな変化は目立っていません。"
+            "今後も日々の様子を継続して確認していきます。"
+        )
+
+    memo_rows = target[target["家族共有メモ"].fillna("").astype(str).str.strip() != ""]
+    change_rows = target[target["気になる変化"].fillna("").astype(str).str.strip() != ""]
+
+    if not memo_rows.empty:
+        first = memo_rows.iloc[0]
+        lines.append(
+            f"ご様子として、{first['記録日'].strftime('%m/%d')}の記録に"
+            f"「{str(first['家族共有メモ'])[:80]}」とあります。"
+            "日々の関わりの中で、ご本人の様子を確認しています。"
+        )
+
+    if not change_rows.empty:
+        first = change_rows.iloc[0]
+        lines.append(
+            f"また、{first['記録日'].strftime('%m/%d')}に"
+            f"「{str(first['気になる変化'])[:80]}」という記録があります。"
+            "必要に応じて職員間で共有しながら見守っています。"
+        )
+
+    lines.append(
+        "今後も、数値だけでなく表情や生活の様子も含めて、安心して過ごせるよう見守ってまいります。"
+    )
+
+    return "\n\n".join(lines)
+
+
+def get_today_dashboard(df, active_users):
+    today = pd.Timestamp(date.today())
+
+    if df.empty:
+        today_df = pd.DataFrame(columns=COLUMNS)
+    else:
+        work = df.copy()
+        work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+        today_df = work[work["記録日"].dt.date == today.date()].copy()
+
+    entered_users = today_df["利用者名"].dropna().astype(str).unique().tolist()
+    missing_users = [user for user in active_users if user not in entered_users]
+
+    temp_alert = today_df[to_number(today_df["体温"]) >= 37.5] if not today_df.empty else today_df
+    spo2_alert = today_df[to_number(today_df["SpO2"]) <= 93] if not today_df.empty else today_df
+    bp_alert = today_df[to_number(today_df["血圧上"]) >= 160] if not today_df.empty else today_df
+
+    alert_rows = pd.concat([temp_alert, spo2_alert, bp_alert]).drop_duplicates() if not today_df.empty else today_df
+
+    memo_count = 0
+    if not today_df.empty:
+        memo_count = int(
+            (
+                today_df["家族共有メモ"].fillna("").astype(str).str.strip() != ""
+            ).sum()
+        )
+
+    return {
+        "today_df": today_df,
+        "entered_users": entered_users,
+        "missing_users": missing_users,
+        "alert_rows": alert_rows,
+        "memo_count": memo_count,
+    }
+
+
+def show_dashboard(active_users):
+    st.header("本日の管理者ダッシュボード")
+    st.caption("今日の入力状況・未入力・注意記録を一画面で確認できます。")
+
+    df = load_data()
+    dashboard = get_today_dashboard(df, active_users)
+
+    today_df = dashboard["today_df"]
+    entered_count = len(dashboard["entered_users"])
+    total_count = len(active_users)
+    missing_users = dashboard["missing_users"]
+    alert_rows = dashboard["alert_rows"]
+    memo_count = dashboard["memo_count"]
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("本日の入力済み", f"{entered_count} / {total_count} 名")
+
+    with col2:
+        st.metric("未入力", f"{len(missing_users)} 名")
+
+    with col3:
+        st.metric("注意記録", f"{len(alert_rows)} 件")
+
+    with col4:
+        st.metric("家族共有メモあり", f"{memo_count} 件")
+
+    st.divider()
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.subheader("未入力の利用者様")
+        if missing_users:
+            st.warning("、".join(missing_users))
+        else:
+            st.success("本日の入力は全員分そろっています。")
+
+    with col_right:
+        st.subheader("本日の記録件数")
+        if today_df.empty:
+            st.info("本日の記録はまだありません。")
+        else:
+            count_df = today_df.groupby("利用者名").size().reset_index(name="記録件数")
+            st.dataframe(count_df, use_container_width=True, hide_index=True)
+
+    st.subheader("注意記録の確認")
+    st.caption("目安：体温37.5℃以上、SpO2 93％以下、血圧上160以上。医療判断ではなく、見落とし防止のための確認欄です。")
+
+    if alert_rows.empty:
+        st.success("本日、設定した注意目安に該当する記録はありません。")
+    else:
+        show_cols = [
+            "記録日",
+            "利用者名",
+            "体温",
+            "血圧上",
+            "血圧下",
+            "脈拍",
+            "SpO2",
+            "体重",
+            "気になる変化",
+            "入力者",
+        ]
+        st.dataframe(alert_rows[show_cols], use_container_width=True, hide_index=True)
+
+    with st.expander("本日の全記録を表示する"):
+        if today_df.empty:
+            st.info("本日の記録はまだありません。")
+        else:
+            st.dataframe(today_df, use_container_width=True, hide_index=True)
+
+
 # =========================
 # 家族向けレポート作成
 # =========================
 def create_family_report(df, user_name, year, month):
-    filtered = df.copy()
-    filtered["記録日"] = pd.to_datetime(filtered["記録日"], errors="coerce")
-
-    target = filtered[
-        (filtered["利用者名"] == user_name)
-        & (filtered["記録日"].dt.year == int(year))
-        & (filtered["記録日"].dt.month == int(month))
-    ].copy()
-
-    target = target.sort_values("記録日")
+    target = get_month_data(df, user_name, year, month)
 
     wb = Workbook()
     ws = wb.active
@@ -318,6 +517,7 @@ def create_family_report(df, user_name, year, month):
     title_fill = PatternFill("solid", fgColor="EADFCB")
     section_fill = PatternFill("solid", fgColor="DDEFE2")
     note_fill = PatternFill("solid", fgColor="FFF8E7")
+    summary_fill = PatternFill("solid", fgColor="F4F0E8")
 
     ws.merge_cells("A1:H1")
     ws["A1"] = "ご家族向け 健康・生活レポート"
@@ -361,29 +561,39 @@ def create_family_report(df, user_name, year, month):
         ws[f"C{row}"] = unit
 
     ws.merge_cells("A14:H14")
-    ws["A14"] = "日付別のご様子（家族共有メモ）"
+    ws["A14"] = "今月のまとめ"
     ws["A14"].font = Font(name="Meiryo", bold=True)
     ws["A14"].fill = section_fill
 
-    ws["A15"] = "日付"
-    ws["B15"] = "家族共有メモ"
-    ws["A15"].fill = note_fill
-    ws["B15"].fill = note_fill
+    summary_text = create_family_summary_text(target, user_name, year, month)
+    ws.merge_cells("A15:H20")
+    ws["A15"] = summary_text
+    ws["A15"].fill = summary_fill
+    ws["A15"].alignment = Alignment(wrap_text=True, vertical="top")
 
-    row = 16
+    row = 22
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    ws.cell(row=row, column=1).value = "日付別のご様子（家族共有メモ）"
+    ws.cell(row=row, column=1).font = Font(name="Meiryo", bold=True)
+    ws.cell(row=row, column=1).fill = section_fill
 
-    memo_rows = target[
-        target["家族共有メモ"].fillna("").astype(str).str.strip() != ""
-    ]
+    row += 1
+    ws.cell(row=row, column=1).value = "日付"
+    ws.cell(row=row, column=2).value = "家族共有メモ"
+    ws.cell(row=row, column=1).fill = note_fill
+    ws.cell(row=row, column=2).fill = note_fill
+
+    row += 1
+    memo_rows = target[target["家族共有メモ"].fillna("").astype(str).str.strip() != ""]
 
     if memo_rows.empty:
-        ws[f"A{row}"] = ""
-        ws[f"B{row}"] = "記録された家族共有メモはありません。"
+        ws.cell(row=row, column=1).value = ""
+        ws.cell(row=row, column=2).value = "記録された家族共有メモはありません。"
         row += 1
     else:
         for _, rec in memo_rows.iterrows():
-            ws[f"A{row}"] = rec["記録日"].strftime("%m/%d")
-            ws[f"B{row}"] = str(rec["家族共有メモ"])
+            ws.cell(row=row, column=1).value = rec["記録日"].strftime("%m/%d")
+            ws.cell(row=row, column=2).value = str(rec["家族共有メモ"])
             row += 1
 
     row += 1
@@ -399,10 +609,7 @@ def create_family_report(df, user_name, year, month):
     ws.cell(row=row, column=2).fill = note_fill
 
     row += 1
-
-    change_rows = target[
-        target["気になる変化"].fillna("").astype(str).str.strip() != ""
-    ]
+    change_rows = target[target["気になる変化"].fillna("").astype(str).str.strip() != ""]
 
     if change_rows.empty:
         ws.cell(row=row, column=1).value = ""
@@ -415,22 +622,12 @@ def create_family_report(df, user_name, year, month):
             row += 1
 
     row += 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
-    ws.cell(row=row, column=1).value = "まとめ"
-    ws.cell(row=row, column=1).font = Font(name="Meiryo", bold=True)
-    ws.cell(row=row, column=1).fill = section_fill
-
-    row += 1
     ws.merge_cells(start_row=row, start_column=1, end_row=row + 2, end_column=8)
     ws.cell(row=row, column=1).value = (
-        "記録上の内容をもとに、今月のご様子をまとめています。"
-        "医療的な判断や診断ではなく、日々の記録に基づく共有です。"
-        "引き続き、ご本人の様子を見守ってまいります。"
+        "※このレポートは、施設内の健康チェック記録をもとにした共有資料です。"
+        "医療的な診断・治療効果の判断を行うものではありません。"
     )
-    ws.cell(row=row, column=1).alignment = Alignment(
-        wrap_text=True,
-        vertical="top",
-    )
+    ws.cell(row=row, column=1).alignment = Alignment(wrap_text=True, vertical="top")
 
     for col in range(1, 9):
         ws.column_dimensions[get_column_letter(col)].width = 16
@@ -451,14 +648,14 @@ def create_family_report(df, user_name, year, month):
     report_path = REPORT_DIR / file_name
     wb.save(report_path)
 
-    return report_path, target
+    return report_path, target, summary_text
 
 
 # =========================
 # アプリ本体
 # =========================
 st.title("健康チェックWebアプリ")
-st.caption("入力はブラウザで、データはExcelへ保存。過去データの検索・更新・削除、月別の家族向けレポート出力ができます。")
+st.caption("入力はブラウザで、データはExcelへ保存。管理者ダッシュボード、過去データ管理、家族向けレポート出力ができます。")
 
 ensure_data_file()
 ensure_user_file()
@@ -470,6 +667,7 @@ ensure_user_file()
 menu = st.sidebar.radio(
     "メニュー",
     [
+        "管理者ダッシュボード",
         "健康チェック入力",
         "過去データ管理",
         "入力データ確認",
@@ -489,9 +687,16 @@ if not active_users:
 
 
 # =========================
+# 管理者ダッシュボード
+# =========================
+if menu == "管理者ダッシュボード":
+    show_dashboard(active_users)
+
+
+# =========================
 # 健康チェック入力
 # =========================
-if menu == "健康チェック入力":
+elif menu == "健康チェック入力":
     st.header("健康チェック入力")
 
     if not active_users:
@@ -917,7 +1122,7 @@ elif menu == "家族向けレポート作成":
         )
 
     if st.button("家族向けレポートを作成"):
-        report_path, target = create_family_report(
+        report_path, target, summary_text = create_family_report(
             df,
             report_user,
             report_year,
@@ -928,6 +1133,9 @@ elif menu == "家族向けレポート作成":
             st.warning("指定した利用者・年月のデータがありません。空のレポートを作成しました。")
         else:
             st.success("家族向けレポートを作成しました。")
+
+        st.subheader("レポート文章プレビュー")
+        st.info(summary_text)
 
         with open(report_path, "rb") as f:
             st.download_button(
