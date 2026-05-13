@@ -70,7 +70,7 @@ def login_check():
 # =========================
 
 if not login_check():
-
+st.stop()
 
 
 
