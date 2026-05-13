@@ -65,12 +65,8 @@ def login_check():
         input_password = st.text_input("パスワード", type="password")
 
         if st.button("ログイン", use_container_width=True):
-            login_id = str(input_id).strip().lower()
-            login_password = str(input_password).strip()
-
-            user = USERS.get(login_id)
-
-            if user and login_password == user["password"]:
+            user = USERS.get(input_id)
+            if user and input_password == user["password"]:
                 st.session_state.logged_in = True
                 st.session_state.role = user["role"]
                 st.session_state.user_label = user["label"]
@@ -751,6 +747,308 @@ def create_family_report(df, user_name, year, month):
     return report_path, target, summary_text
 
 
+
+
+# =========================
+# ひだまりレポートPDF作成
+# =========================
+def create_chart_image(target, item):
+    """PDFに差し込むバイタル推移グラフ画像を作成する。"""
+    if target.empty or item not in target.columns:
+        return None
+
+    chart_df = target[["記録日", item]].copy()
+    chart_df["記録日"] = pd.to_datetime(chart_df["記録日"], errors="coerce")
+    chart_df[item] = pd.to_numeric(chart_df[item], errors="coerce")
+    chart_df = chart_df.dropna()
+
+    if chart_df.empty:
+        return None
+
+    import matplotlib.pyplot as plt
+    from io import BytesIO
+
+    fig, ax = plt.subplots(figsize=(5.8, 2.2))
+    ax.plot(chart_df["記録日"], chart_df[item], marker="o")
+    ax.set_title(f"{item}の推移")
+    ax.set_xlabel("日付")
+    ax.set_ylabel(item)
+    ax.grid(True)
+    fig.autofmt_xdate()
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def create_hidamari_report_pdf(df, user_name, year, month):
+    """ご家族向けのPDF『ひだまりレポート』を作成する。"""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        Image,
+        PageBreak,
+    )
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.graphics.shapes import Drawing, Circle, Rect, Polygon, Line
+
+    ensure_dirs()
+
+    # 日本語フォント登録
+    pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
+    pdfmetrics.registerFont(UnicodeCIDFont("HeiseiMin-W3"))
+
+    target = get_month_data(df, user_name, year, month)
+    summary_text = create_family_summary_text(target, user_name, year, month)
+
+    file_name = f"ひだまりレポート_{user_name}_{year}年{month}月.pdf"
+    pdf_path = REPORT_DIR / file_name
+
+    doc = SimpleDocTemplate(
+        str(pdf_path),
+        pagesize=A4,
+        rightMargin=16 * mm,
+        leftMargin=16 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "jp_title",
+        parent=styles["Title"],
+        fontName="HeiseiKakuGo-W5",
+        fontSize=22,
+        leading=28,
+        alignment=1,
+        textColor=colors.HexColor("#5E7D3A"),
+        spaceAfter=8,
+    )
+    subtitle_style = ParagraphStyle(
+        "jp_subtitle",
+        parent=styles["Normal"],
+        fontName="HeiseiKakuGo-W5",
+        fontSize=11,
+        leading=16,
+        alignment=1,
+        textColor=colors.HexColor("#6B6B6B"),
+        spaceAfter=12,
+    )
+    h2_style = ParagraphStyle(
+        "jp_h2",
+        parent=styles["Heading2"],
+        fontName="HeiseiKakuGo-W5",
+        fontSize=14,
+        leading=18,
+        textColor=colors.HexColor("#386641"),
+        spaceBefore=8,
+        spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        "jp_body",
+        parent=styles["BodyText"],
+        fontName="HeiseiMin-W3",
+        fontSize=10.5,
+        leading=17,
+        textColor=colors.HexColor("#333333"),
+    )
+    small_style = ParagraphStyle(
+        "jp_small",
+        parent=styles["BodyText"],
+        fontName="HeiseiMin-W3",
+        fontSize=8.5,
+        leading=12,
+        textColor=colors.HexColor("#666666"),
+    )
+
+    story = []
+
+    # やさしいイラスト風の帯
+    drawing = Drawing(500, 72)
+    drawing.add(Rect(0, 0, 500, 72, fillColor=colors.HexColor("#FFF4D9"), strokeColor=colors.HexColor("#E8C78A")))
+    drawing.add(Circle(52, 43, 18, fillColor=colors.HexColor("#FFD56B"), strokeColor=colors.HexColor("#E8B94E")))
+    for x1, y1, x2, y2 in [
+        (52, 68, 52, 61), (52, 25, 52, 18), (27, 43, 35, 43),
+        (69, 43, 78, 43), (36, 58, 41, 53), (68, 58, 63, 53),
+        (36, 28, 41, 33), (68, 28, 63, 33)
+    ]:
+        drawing.add(Line(x1, y1, x2, y2, strokeColor=colors.HexColor("#E8B94E"), strokeWidth=1.2))
+
+    # 家のアイコン
+    drawing.add(Polygon([390, 28, 430, 58, 470, 28], fillColor=colors.HexColor("#E07A5F"), strokeColor=colors.HexColor("#C85F45")))
+    drawing.add(Rect(402, 18, 56, 30, fillColor=colors.HexColor("#F2CC8F"), strokeColor=colors.HexColor("#B78B57")))
+    drawing.add(Rect(424, 18, 12, 20, fillColor=colors.HexColor("#8D6E63"), strokeColor=colors.HexColor("#8D6E63")))
+    drawing.add(Circle(128, 45, 6, fillColor=colors.HexColor("#F4A261"), strokeColor=None))
+    drawing.add(Circle(144, 34, 5, fillColor=colors.HexColor("#E76F51"), strokeColor=None))
+    drawing.add(Circle(160, 47, 6, fillColor=colors.HexColor("#90BE6D"), strokeColor=None))
+    drawing.add(Line(130, 20, 160, 50, strokeColor=colors.HexColor("#6A994E"), strokeWidth=1))
+    story.append(drawing)
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph("ひだまりレポート", title_style))
+    story.append(Paragraph("ご家族へお届けする、月間の健康・生活記録", subtitle_style))
+
+    info_table = Table(
+        [
+            ["利用者様", str(user_name), "対象月", f"{year}年{month}月"],
+            ["作成日", date.today().strftime("%Y/%m/%d"), "作成元", "ひだまり弐番館"],
+        ],
+        colWidths=[28 * mm, 55 * mm, 28 * mm, 55 * mm],
+    )
+    info_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FAF6EA")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEADING", (0, 0), (-1, -1), 13),
+            ]
+        )
+    )
+    story.append(info_table)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("今月のまとめ", h2_style))
+    for paragraph in summary_text.split("\n\n"):
+        story.append(Paragraph(paragraph.replace("\n", "<br/>"), body_style))
+        story.append(Spacer(1, 5))
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("健康状態の目安", h2_style))
+
+    metrics = [
+        ("体温平均", "体温", "℃"),
+        ("血圧上平均", "血圧上", ""),
+        ("血圧下平均", "血圧下", ""),
+        ("脈拍平均", "脈拍", "回/分"),
+        ("SpO2平均", "SpO2", "%"),
+        ("体重平均", "体重", "kg"),
+    ]
+
+    metric_rows = [["項目", "記録上の平均", "単位"]]
+    for label, col, unit in metrics:
+        if target.empty:
+            value = ""
+        else:
+            value = to_number(target[col]).mean()
+            value = "" if pd.isna(value) else round(float(value), 1)
+        metric_rows.append([label, value, unit])
+
+    metric_table = Table(metric_rows, colWidths=[50 * mm, 45 * mm, 30 * mm])
+    metric_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#DDEFE2")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#B7C9B7")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#B7C9B7")),
+                ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ]
+        )
+    )
+    story.append(metric_table)
+
+    story.append(PageBreak())
+
+    story.append(Paragraph("バイタル推移グラフ", h2_style))
+    story.append(Paragraph("日々の記録をもとに、体調の経過を見える化しています。", body_style))
+    story.append(Spacer(1, 6))
+
+    chart_items = ["体温", "血圧上", "SpO2", "体重"]
+    chart_buffers = []
+    for item in chart_items:
+        buf = create_chart_image(target, item)
+        if buf is not None:
+            chart_buffers.append((item, buf))
+
+    if not chart_buffers:
+        story.append(Paragraph("グラフ化できる記録はまだありません。", body_style))
+    else:
+        for item, buf in chart_buffers:
+            story.append(Paragraph(item, h2_style))
+            story.append(Image(buf, width=165 * mm, height=58 * mm))
+            story.append(Spacer(1, 6))
+
+    story.append(PageBreak())
+
+    story.append(Paragraph("日々のご様子", h2_style))
+
+    memo_rows = target[target["家族共有メモ"].fillna("").astype(str).str.strip() != ""] if not target.empty else pd.DataFrame()
+    change_rows = target[target["気になる変化"].fillna("").astype(str).str.strip() != ""] if not target.empty else pd.DataFrame()
+
+    story.append(Paragraph("家族共有メモ", h2_style))
+    if memo_rows.empty:
+        story.append(Paragraph("記録された家族共有メモはありません。", body_style))
+    else:
+        rows = [["日付", "内容"]]
+        for _, rec in memo_rows.iterrows():
+            rows.append([rec["記録日"].strftime("%m/%d"), Paragraph(str(rec["家族共有メモ"]), body_style)])
+        table = Table(rows, colWidths=[22 * mm, 140 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFF8E7")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(table)
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("気になる変化", h2_style))
+    if change_rows.empty:
+        story.append(Paragraph("記録された気になる変化はありません。", body_style))
+    else:
+        rows = [["日付", "内容"]]
+        for _, rec in change_rows.iterrows():
+            rows.append([rec["記録日"].strftime("%m/%d"), Paragraph(str(rec["気になる変化"]), body_style)])
+        table = Table(rows, colWidths=[22 * mm, 140 * mm])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), "HeiseiKakuGo-W5"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#FFF8E7")),
+                    ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D8C7A1")),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#D8C7A1")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(table)
+
+    story.append(Spacer(1, 12))
+    story.append(
+        Paragraph(
+            "※このレポートは、施設内の健康チェック記録をもとにした共有資料です。医療的な診断・治療効果の判断を行うものではありません。",
+            small_style,
+        )
+    )
+
+    doc.build(story)
+    return pdf_path, summary_text, target
+
+
 # =========================
 # アプリ本体
 # =========================
@@ -774,6 +1072,7 @@ if st.session_state.role == "admin":
         "過去データ管理",
         "入力データ確認",
         "家族向けレポート作成",
+        "ひだまりレポートPDF",
         "管理者支援",
         "利用者マスタ管理",
     ]
@@ -1223,6 +1522,85 @@ elif menu == "家族向けレポート作成":
                 file_name=report_path.name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
+
+
+# =========================
+# ひだまりレポートPDF
+# =========================
+elif menu == "ひだまりレポートPDF":
+    if st.session_state.role != "admin":
+        st.error("この画面は管理者専用です。")
+        st.stop()
+
+    st.header("ひだまりレポートPDF")
+    st.caption("ご家族にお渡ししやすい、イラスト風の表紙・グラフ・月間まとめ付きPDFを作成します。")
+
+    df = load_data()
+
+    if not all_users:
+        st.warning("利用者が登録されていません。")
+        st.stop()
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        pdf_user = st.selectbox("利用者名", all_users, key="pdf_user")
+
+    with col2:
+        pdf_year = st.number_input(
+            "対象年",
+            min_value=2024,
+            max_value=2035,
+            value=date.today().year,
+            step=1,
+            key="pdf_year",
+        )
+
+    with col3:
+        pdf_month = st.number_input(
+            "対象月",
+            min_value=1,
+            max_value=12,
+            value=date.today().month,
+            step=1,
+            key="pdf_month",
+        )
+
+    st.info("PDFには、今月のまとめ・健康状態の目安・バイタル推移グラフ・家族共有メモ・気になる変化が入ります。")
+
+    if st.button("ひだまりレポートPDFを作成する"):
+        try:
+            pdf_path, summary_text, target = create_hidamari_report_pdf(
+                df,
+                pdf_user,
+                pdf_year,
+                pdf_month,
+            )
+
+            if target.empty:
+                st.warning("指定した利用者・年月のデータがありません。空のレポートを作成しました。")
+            else:
+                st.success("ひだまりレポートPDFを作成しました。")
+
+            st.subheader("レポート文章プレビュー")
+            st.info(summary_text)
+
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    "PDFをダウンロード",
+                    data=f,
+                    file_name=pdf_path.name,
+                    mime="application/pdf",
+                )
+
+        except ModuleNotFoundError as e:
+            st.error("PDF作成に必要なライブラリが不足しています。requirements.txt に reportlab と matplotlib を追加してください。")
+            st.code("reportlab\nmatplotlib")
+        except Exception as e:
+            st.error("PDF作成中にエラーが発生しました。")
+            st.exception(e)
+
 
 
 # =========================
