@@ -1,19 +1,3 @@
-
-# =========================
-# アセスメント項目
-# =========================
-ASSESSMENT_COLUMNS = [
-    "基本情報",
-    "主訴",
-    "生活状況",
-    "ADL",
-    "IADL",
-    "認知機能",
-    "健康状態",
-    "課題",
-    "支援内容",
-]
-
 import streamlit as st
 import pandas as pd
 from pathlib import Path
@@ -171,6 +155,19 @@ DEFAULT_USERS = [
 ]
 
 
+ASSESSMENT_COLUMNS = [
+    "基本情報",
+    "主訴",
+    "生活状況",
+    "ADL",
+    "IADL",
+    "認知機能",
+    "健康状態",
+    "課題",
+    "支援内容",
+]
+
+
 COLUMNS = [
     "記録日",
     "利用者名",
@@ -203,12 +200,14 @@ def ensure_dirs():
 def ensure_user_file():
     ensure_dirs()
     if not USER_FILE.exists():
-        df = pd.DataFrame(
-            {
-                "利用者名": DEFAULT_USERS,
-                "表示": ["表示"] * len(DEFAULT_USERS),
-            }
-        )
+        data = {
+            "利用者名": DEFAULT_USERS,
+            "表示": ["表示"] * len(DEFAULT_USERS),
+        }
+        for col in ASSESSMENT_COLUMNS:
+            data[col] = [""] * len(DEFAULT_USERS)
+
+        df = pd.DataFrame(data)
         df.to_excel(USER_FILE, index=False, sheet_name=USER_SHEET)
 
 
@@ -218,18 +217,23 @@ def load_users(include_hidden=False):
     try:
         df = pd.read_excel(USER_FILE, sheet_name=USER_SHEET)
     except Exception:
-        df = pd.DataFrame(
-            {
-                "利用者名": DEFAULT_USERS,
-                "表示": ["表示"] * len(DEFAULT_USERS),
-            }
-        )
+        data = {
+            "利用者名": DEFAULT_USERS,
+            "表示": ["表示"] * len(DEFAULT_USERS),
+        }
+        for col in ASSESSMENT_COLUMNS:
+            data[col] = [""] * len(DEFAULT_USERS)
+        df = pd.DataFrame(data)
 
     if "利用者名" not in df.columns:
         df["利用者名"] = DEFAULT_USERS
 
     if "表示" not in df.columns:
         df["表示"] = "表示"
+
+    for col in ASSESSMENT_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
 
     df["利用者名"] = df["利用者名"].astype(str).str.strip()
     df = df[df["利用者名"] != ""].drop_duplicates(
@@ -254,12 +258,22 @@ def save_users(df):
     if "表示" not in df.columns:
         df["表示"] = "表示"
 
+    for col in ASSESSMENT_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
     df["利用者名"] = df["利用者名"].astype(str).str.strip()
     df = df[df["利用者名"] != ""].drop_duplicates(
         subset=["利用者名"],
         keep="first",
     )
 
+    ordered_cols = ["利用者名", "表示"] + ASSESSMENT_COLUMNS
+    for col in ordered_cols:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[ordered_cols]
     df.to_excel(USER_FILE, index=False, sheet_name=USER_SHEET)
 
 
@@ -276,14 +290,14 @@ def add_user(user_name):
         save_users(df)
         return True, f"{user_name} を表示に戻しました。"
 
-    new_row = pd.DataFrame(
-        [
-            {
-                "利用者名": user_name,
-                "表示": "表示",
-            }
-        ]
-    )
+    row = {
+        "利用者名": user_name,
+        "表示": "表示",
+    }
+    for col in ASSESSMENT_COLUMNS:
+        row[col] = ""
+
+    new_row = pd.DataFrame([row])
 
     df = pd.concat([df, new_row], ignore_index=True)
     save_users(df)
@@ -376,6 +390,54 @@ def safe_text(value):
     return str(value)
 
 
+
+def get_user_assessment(user_name):
+    """利用者マスタからアセスメント情報を取得する。"""
+    try:
+        df_users = load_users(include_hidden=True)
+        row = df_users[df_users["利用者名"] == user_name]
+
+        if row.empty:
+            return {}
+
+        row = row.iloc[0]
+        return {
+            col: safe_text(row.get(col, "")).strip()
+            for col in ASSESSMENT_COLUMNS
+            if safe_text(row.get(col, "")).strip()
+        }
+    except Exception:
+        return {}
+
+
+def build_assessment_context_text(user_name):
+    """AIレポートや申し送りに使いやすい背景情報を文章化する。"""
+    assessment = get_user_assessment(user_name)
+
+    if not assessment:
+        return ""
+
+    important_cols = [
+        "主訴",
+        "生活状況",
+        "ADL",
+        "IADL",
+        "認知機能",
+        "健康状態",
+        "課題",
+        "支援内容",
+    ]
+
+    parts = []
+
+    for col in important_cols:
+        value = assessment.get(col, "")
+        if value:
+            parts.append(f"{col}：{value}")
+
+    return "\n".join(parts)
+
+
 def get_month_data(df, user_name, year, month):
     work = df.copy()
     work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
@@ -399,6 +461,13 @@ def create_family_summary_text(target, user_name, year, month):
         f"{user_name}の{year}年{month}月の記録は、{record_count}件確認されています。"
         "この文章は医療的な判断ではなく、日々の健康チェック記録をもとにした共有です。"
     )
+
+    assessment_context = build_assessment_context_text(user_name)
+    if assessment_context:
+        lines.append(
+            "利用者様の背景情報として、以下の内容を参考にしています。\n"
+            + assessment_context
+        )
 
     temp_mean = to_number(target["体温"]).mean()
     spo2_mean = to_number(target["SpO2"]).mean()
@@ -2019,6 +2088,9 @@ elif menu == "管理者支援":
 利用者名：{prompt_user}
 対象月：{prompt_year}年{prompt_month}月
 
+【アセスメント情報】
+{build_assessment_context_text(prompt_user)}
+
 【記録データ】
 {target.to_string(index=False)}
 """
@@ -2040,15 +2112,16 @@ elif menu == "利用者マスタ管理":
         st.stop()
 
     st.header("利用者マスタ管理")
-    st.caption("利用者の追加・入力候補からの削除ができます。削除しても過去の入力データは残ります。")
+    st.caption("利用者の追加・非表示・アセスメント情報の登録管理ができます。")
 
     df_users = load_users(include_hidden=True)
 
     st.subheader("現在の利用者一覧")
-    st.dataframe(df_users, use_container_width=True)
+    st.dataframe(df_users, use_container_width=True, hide_index=True)
+
+    st.divider()
 
     st.subheader("利用者を追加")
-
     with st.form("add_user_form", clear_on_submit=True):
         new_user = st.text_input("追加する利用者名", placeholder="例：田中様")
         add_submit = st.form_submit_button("追加する")
@@ -2062,13 +2135,122 @@ elif menu == "利用者マスタ管理":
         else:
             st.error(msg)
 
-    st.subheader("利用者を入力候補から外す")
+    st.divider()
 
+    st.subheader("アセスメント情報の登録・更新")
+    st.caption("家族レポートやAI分析の背景情報として活用できます。")
+
+    if df_users.empty:
+        st.info("利用者が登録されていません。")
+    else:
+        selected_user = st.selectbox(
+            "アセスメントを編集する利用者",
+            df_users["利用者名"].tolist(),
+            key="assessment_edit_user",
+        )
+
+        selected_df = df_users[df_users["利用者名"] == selected_user]
+
+        if not selected_df.empty:
+            selected = selected_df.iloc[0]
+
+            with st.form("assessment_form"):
+                basic_info = st.text_area(
+                    "基本情報（氏名・住所など）",
+                    value=safe_text(selected.get("基本情報", "")),
+                    height=80,
+                    placeholder="例：年齢、家族構成、生活上の基本情報など",
+                )
+
+                main_complaint = st.text_area(
+                    "主訴（本人・家族の希望や困りごと）",
+                    value=safe_text(selected.get("主訴", "")),
+                    height=100,
+                    placeholder="例：本人・家族が困っていること、希望していること",
+                )
+
+                life_status = st.text_area(
+                    "生活状況（1日の流れ）",
+                    value=safe_text(selected.get("生活状況", "")),
+                    height=120,
+                    placeholder="例：起床、食事、排泄、入浴、就寝などの流れ",
+                )
+
+                adl = st.text_area(
+                    "ADL（日常生活動作）",
+                    value=safe_text(selected.get("ADL", "")),
+                    height=100,
+                    placeholder="例：移動、食事、更衣、排泄、入浴など。条件付きで記載",
+                )
+
+                iadl = st.text_area(
+                    "IADL（生活関連動作）",
+                    value=safe_text(selected.get("IADL", "")),
+                    height=100,
+                    placeholder="例：買い物、服薬管理、金銭管理、掃除など。「していない」と「できない」を区別",
+                )
+
+                cognitive = st.text_area(
+                    "認知機能（判断・記憶）",
+                    value=safe_text(selected.get("認知機能", "")),
+                    height=100,
+                    placeholder="例：生活場面で見られる判断・記憶の様子",
+                )
+
+                health = st.text_area(
+                    "健康状態（疾患・服薬）",
+                    value=safe_text(selected.get("健康状態", "")),
+                    height=100,
+                    placeholder="例：疾患、服薬、生活への影響など",
+                )
+
+                issue = st.text_area(
+                    "課題（支援が必要な問題点）",
+                    value=safe_text(selected.get("課題", "")),
+                    height=100,
+                    placeholder="例：背景や原因もあわせて整理",
+                )
+
+                support = st.text_area(
+                    "支援内容（具体的な対応）",
+                    value=safe_text(selected.get("支援内容", "")),
+                    height=100,
+                    placeholder="例：実行可能な支援内容",
+                )
+
+                assessment_submit = st.form_submit_button("アセスメント情報を保存する")
+
+            if assessment_submit:
+                df_save = load_users(include_hidden=True)
+
+                mask = df_save["利用者名"] == selected_user
+
+                if mask.any():
+                    df_save.loc[mask, "基本情報"] = basic_info
+                    df_save.loc[mask, "主訴"] = main_complaint
+                    df_save.loc[mask, "生活状況"] = life_status
+                    df_save.loc[mask, "ADL"] = adl
+                    df_save.loc[mask, "IADL"] = iadl
+                    df_save.loc[mask, "認知機能"] = cognitive
+                    df_save.loc[mask, "健康状態"] = health
+                    df_save.loc[mask, "課題"] = issue
+                    df_save.loc[mask, "支援内容"] = support
+
+                    save_users(df_save)
+
+                    st.success("アセスメント情報を保存しました。")
+                    st.rerun()
+                else:
+                    st.error("対象の利用者が見つかりません。")
+
+    st.divider()
+
+    st.subheader("利用者を入力候補から外す")
     visible_users = load_users(include_hidden=False)["利用者名"].tolist()
 
     if visible_users:
         target_user = st.selectbox("対象利用者", visible_users)
-        st.warning("この操作は、入力画面の候補から外すだけです。過去データは削除されません。")
+        st.warning("この操作は、入力画面の候補から外すだけです。過去データとアセスメント情報は削除されません。")
 
         if st.button("入力候補から外す"):
             ok, msg = hide_user(target_user)
@@ -2083,7 +2265,7 @@ elif menu == "利用者マスタ管理":
         st.info("現在、表示中の利用者はいません。")
 
     st.subheader("非表示の利用者を戻す")
-
+    df_users = load_users(include_hidden=True)
     hidden_df = df_users[df_users["表示"] == "非表示"]
 
     if not hidden_df.empty:
@@ -2108,29 +2290,3 @@ elif menu == "利用者マスタ管理":
             file_name="利用者マスタ.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-
-
-# =========================
-# AI分析メモ
-# =========================
-# 利用者マスタへ追加された
-# ・主訴
-# ・生活状況
-# ・ADL
-# ・IADL
-# ・認知機能
-# ・健康状態
-# ・課題
-# ・支援内容
-#
-# これらを家族レポート生成時の
-# 「背景情報」としてAI要約へ反映可能。
-#
-# 例：
-# ・食事低下 + 認知低下
-# ・ADL低下 + 排便異常
-# ・生活状況変化
-#
-# を組み合わせて、
-# 「生活全体の変化」
-# として自然文生成できる。
