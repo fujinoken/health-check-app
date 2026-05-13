@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import hashlib
 from pathlib import Path
 from datetime import date, datetime
 from openpyxl import Workbook
@@ -389,7 +390,14 @@ def load_data():
     if not df.empty:
         df["記録日"] = pd.to_datetime(df["記録日"], errors="coerce")
 
-    return df
+        # 排泄詳細は介護上重要な文字列データなので、欠損を空欄に整える
+        for slot, _ in EXCRETION_SLOTS:
+            for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+                col = f"{slot}{suffix}"
+                if col in df.columns:
+                    df[col] = df[col].fillna("").astype(str)
+
+    return df.astype("object")
 
 
 def save_data(df):
@@ -551,12 +559,44 @@ def safe_text(value):
 
 
 
-def build_excretion_inputs(existing_row=None):
+def build_excretion_key_signature(existing_row):
+    """排泄詳細の保存値から、画面表示用の短い署名を作る。
+    これをWidget keyに含めることで、既存データがある場合に保存値を確実に初期表示する。
+    """
+    if existing_row is None:
+        return "new"
+
+    values = []
+    for slot, _ in EXCRETION_SLOTS:
+        for suffix in ["尿量", "尿性状", "便量", "便性状"]:
+            col = f"{slot}{suffix}"
+            value = existing_row.get(col, "")
+            if pd.isna(value):
+                value = ""
+            values.append(str(value))
+
+    raw = "|".join(values)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
+
+
+def get_option_index(options, value, default="なし"):
+    """プルダウンの安全なindex取得。空欄・nan・不正値はdefaultへ戻す。"""
+    if pd.isna(value) or value == "" or str(value).lower() == "nan":
+        value = default
+    value = str(value)
+    if value in options:
+        return options.index(value)
+    if default in options:
+        return options.index(default)
+    return 0
+
+
+def build_excretion_inputs(existing_row=None, key_prefix=""):
     """時系列で排泄状況を入力し、合計回数と詳細データを返す。
-    既存データがある場合は、その値を初期表示する。
+    既存データがある場合は、その値を確実に初期表示する。
     """
     st.subheader("排泄状況")
-    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。尿量・便量が「なし」の場合、性状は保存時に空欄になります。")
+    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。既存データがある場合は保存済みの排泄詳細を表示します。")
 
     excretion_data = {}
     urine_count = 0
@@ -565,15 +605,16 @@ def build_excretion_inputs(existing_row=None):
     def get_existing_value(col_name, default):
         if existing_row is None:
             return default
-        value = existing_row.get(col_name, default)
-        if pd.isna(value) or value == "":
-            return default
-        return str(value)
 
-    def get_index(options, value, default_index=0):
-        if value in options:
-            return options.index(value)
-        return default_index
+        try:
+            value = existing_row.get(col_name, default)
+        except Exception:
+            return default
+
+        if pd.isna(value) or value == "" or str(value).lower() == "nan":
+            return default
+
+        return str(value)
 
     def slot_card(slot, time_label, card_color, border_color):
         nonlocal urine_count, stool_count, excretion_data
@@ -593,32 +634,38 @@ def build_excretion_inputs(existing_row=None):
         stool_amount_default = get_existing_value(f"{slot}便量", "なし")
         stool_type_default = get_existing_value(f"{slot}便性状", "なし")
 
+        # 保存済み排泄詳細の署名をkeyに含める。
+        # これにより、日付・利用者を変えた時、または保存値が変わった時に
+        # Streamlitの前回入力キャッシュではなく保存データが正しく表示される。
+        signature = build_excretion_key_signature(existing_row)
+        base_key = f"{key_prefix}_{signature}_{slot}"
+
         urine_amount = st.selectbox(
             f"{slot} 尿量",
             URINE_AMOUNT_OPTIONS,
-            index=get_index(URINE_AMOUNT_OPTIONS, urine_amount_default),
-            key=f"excretion_{slot}_urine_amount",
+            index=get_option_index(URINE_AMOUNT_OPTIONS, urine_amount_default, default="なし"),
+            key=f"{base_key}_urine_amount",
         )
 
         urine_type = st.selectbox(
             f"{slot} 尿性状",
             URINE_TYPE_OPTIONS,
-            index=get_index(URINE_TYPE_OPTIONS, urine_type_default),
-            key=f"excretion_{slot}_urine_type",
+            index=get_option_index(URINE_TYPE_OPTIONS, urine_type_default, default="なし"),
+            key=f"{base_key}_urine_type",
         )
 
         stool_amount = st.selectbox(
             f"{slot} 便量",
             STOOL_AMOUNT_OPTIONS,
-            index=get_index(STOOL_AMOUNT_OPTIONS, stool_amount_default),
-            key=f"excretion_{slot}_stool_amount",
+            index=get_option_index(STOOL_AMOUNT_OPTIONS, stool_amount_default, default="なし"),
+            key=f"{base_key}_stool_amount",
         )
 
         stool_type = st.selectbox(
             f"{slot} 便性状",
             STOOL_TYPE_OPTIONS,
-            index=get_index(STOOL_TYPE_OPTIONS, stool_type_default),
-            key=f"excretion_{slot}_stool_type",
+            index=get_option_index(STOOL_TYPE_OPTIONS, stool_type_default, default="なし"),
+            key=f"{base_key}_stool_type",
         )
 
         excretion_data[f"{slot}尿量"] = urine_amount
@@ -660,7 +707,7 @@ def build_excretion_inputs(existing_row=None):
 
     st.info(f"自動集計：排尿 {urine_count} 回 ／ 排便 {stool_count} 回")
 
-    with st.expander("保存される排泄詳細を確認する"):
+    with st.expander("保存・更新される排泄詳細を確認する"):
         preview = pd.DataFrame([excretion_data])
         st.dataframe(preview, use_container_width=True, hide_index=True)
 
@@ -1965,6 +2012,13 @@ elif menu == "健康チェック入力":
             unsafe_allow_html=True,
         )
 
+        ex_cols = []
+        for slot, _ in EXCRETION_SLOTS:
+            ex_cols.extend([f"{slot}尿量", f"{slot}尿性状", f"{slot}便量", f"{slot}便性状"])
+        ex_cols = [c for c in ex_cols if c in existing_df.columns]
+        with st.expander("保存済みの排泄詳細を確認する", expanded=False):
+            st.dataframe(pd.DataFrame([existing_row[ex_cols]]), use_container_width=True, hide_index=True)
+
     def row_float(col, default):
         if existing_row is None:
             return default
@@ -2084,7 +2138,11 @@ elif menu == "健康チェック入力":
             )
 
         st.divider()
-        urine_count, stool_count, excretion_data = build_excretion_inputs(existing_row)
+        input_record_key = make_record_key(record_date, user_name).replace("-", "_").replace("__", "_")
+        urine_count, stool_count, excretion_data = build_excretion_inputs(
+            existing_row,
+            key_prefix=f"input_{input_record_key}",
+        )
 
         st.divider()
         family_memo = st.text_area(
@@ -2283,6 +2341,8 @@ elif menu == "過去データ管理":
         st.write("選択中の検索キー")
         st.code(f"{make_record_key(key_date, key_user)}")
 
+        edit_record_key = make_record_key(key_date, key_user).replace("-", "_").replace("__", "_")
+
         with st.form("key_update_form"):
             edit_date = st.date_input(
                 "記録日",
@@ -2336,26 +2396,26 @@ elif menu == "過去データ管理":
                     ua = st.selectbox(
                         f"{slot} 尿量",
                         URINE_AMOUNT_OPTIONS,
-                        index=URINE_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿量", "なし"))) if safe_text(selected_row.get(f"{slot}尿量", "なし")) in URINE_AMOUNT_OPTIONS else 0,
-                        key=f"edit_{slot}_ua",
+                        index=get_option_index(URINE_AMOUNT_OPTIONS, selected_row.get(f"{slot}尿量", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_ua",
                     )
                     ut = st.selectbox(
                         f"{slot} 尿性状",
                         URINE_TYPE_OPTIONS,
-                        index=URINE_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿性状", "普通尿"))) if safe_text(selected_row.get(f"{slot}尿性状", "普通尿")) in URINE_TYPE_OPTIONS else 0,
-                        key=f"edit_{slot}_ut",
+                        index=get_option_index(URINE_TYPE_OPTIONS, selected_row.get(f"{slot}尿性状", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_ut",
                     )
                     sa = st.selectbox(
                         f"{slot} 便量",
                         STOOL_AMOUNT_OPTIONS,
-                        index=STOOL_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}便量", "なし"))) if safe_text(selected_row.get(f"{slot}便量", "なし")) in STOOL_AMOUNT_OPTIONS else 0,
-                        key=f"edit_{slot}_sa",
+                        index=get_option_index(STOOL_AMOUNT_OPTIONS, selected_row.get(f"{slot}便量", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_sa",
                     )
                     stt = st.selectbox(
                         f"{slot} 便性状",
                         STOOL_TYPE_OPTIONS,
-                        index=STOOL_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}便性状", "普通便"))) if safe_text(selected_row.get(f"{slot}便性状", "普通便")) in STOOL_TYPE_OPTIONS else 0,
-                        key=f"edit_{slot}_st",
+                        index=get_option_index(STOOL_TYPE_OPTIONS, selected_row.get(f"{slot}便性状", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_st",
                     )
 
                     edit_excretion_data[f"{slot}尿量"] = ua
@@ -2376,26 +2436,26 @@ elif menu == "過去データ管理":
                     ua = st.selectbox(
                         f"{slot} 尿量",
                         URINE_AMOUNT_OPTIONS,
-                        index=URINE_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿量", "なし"))) if safe_text(selected_row.get(f"{slot}尿量", "なし")) in URINE_AMOUNT_OPTIONS else 0,
-                        key=f"edit_{slot}_ua",
+                        index=get_option_index(URINE_AMOUNT_OPTIONS, selected_row.get(f"{slot}尿量", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_ua",
                     )
                     ut = st.selectbox(
                         f"{slot} 尿性状",
                         URINE_TYPE_OPTIONS,
-                        index=URINE_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}尿性状", "普通尿"))) if safe_text(selected_row.get(f"{slot}尿性状", "普通尿")) in URINE_TYPE_OPTIONS else 0,
-                        key=f"edit_{slot}_ut",
+                        index=get_option_index(URINE_TYPE_OPTIONS, selected_row.get(f"{slot}尿性状", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_ut",
                     )
                     sa = st.selectbox(
                         f"{slot} 便量",
                         STOOL_AMOUNT_OPTIONS,
-                        index=STOOL_AMOUNT_OPTIONS.index(safe_text(selected_row.get(f"{slot}便量", "なし"))) if safe_text(selected_row.get(f"{slot}便量", "なし")) in STOOL_AMOUNT_OPTIONS else 0,
-                        key=f"edit_{slot}_sa",
+                        index=get_option_index(STOOL_AMOUNT_OPTIONS, selected_row.get(f"{slot}便量", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_sa",
                     )
                     stt = st.selectbox(
                         f"{slot} 便性状",
                         STOOL_TYPE_OPTIONS,
-                        index=STOOL_TYPE_OPTIONS.index(safe_text(selected_row.get(f"{slot}便性状", "普通便"))) if safe_text(selected_row.get(f"{slot}便性状", "普通便")) in STOOL_TYPE_OPTIONS else 0,
-                        key=f"edit_{slot}_st",
+                        index=get_option_index(STOOL_TYPE_OPTIONS, selected_row.get(f"{slot}便性状", "なし"), default="なし"),
+                        key=f"edit_{edit_record_key}_{slot}_st",
                     )
 
                     edit_excretion_data[f"{slot}尿量"] = ua
