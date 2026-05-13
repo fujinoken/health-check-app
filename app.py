@@ -441,11 +441,65 @@ def safe_text(value):
 def build_excretion_inputs():
     """時系列で排泄状況を入力し、合計回数と詳細データを返す。"""
     st.subheader("排泄状況")
-    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。")
+    st.caption("日中帯（9時〜17時）と夜間帯（18時〜翌8時）を時系列で記録できます。尿量・便量が「なし」の場合、性状は保存時に空欄になります。")
 
     excretion_data = {}
     urine_count = 0
     stool_count = 0
+
+    def slot_card(slot, time_label, card_color, border_color):
+        nonlocal urine_count, stool_count, excretion_data
+
+        st.markdown(
+            f"""
+            <div style='background:{card_color}; padding:12px; border-radius:14px; border:1px solid {border_color}; margin-bottom:10px;'>
+                <b style='font-size:16px;'>{slot}</b><br>
+                <span style='font-size:12px; color:#666;'>{time_label}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # 「なし」を選んでも性状欄は選べるようにしておく。
+        # 保存時に量が「なし」の場合は性状を空欄保存する。
+        urine_amount = st.selectbox(
+            f"{slot} 尿量",
+            URINE_AMOUNT_OPTIONS,
+            index=0,
+            key=f"excretion_{slot}_urine_amount",
+        )
+
+        urine_type = st.selectbox(
+            f"{slot} 尿性状",
+            URINE_TYPE_OPTIONS,
+            index=0,
+            key=f"excretion_{slot}_urine_type",
+        )
+
+        stool_amount = st.selectbox(
+            f"{slot} 便量",
+            STOOL_AMOUNT_OPTIONS,
+            index=0,
+            key=f"excretion_{slot}_stool_amount",
+        )
+
+        stool_type = st.selectbox(
+            f"{slot} 便性状",
+            STOOL_TYPE_OPTIONS,
+            index=0,
+            key=f"excretion_{slot}_stool_type",
+        )
+
+        excretion_data[f"{slot}尿量"] = urine_amount
+        excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
+        excretion_data[f"{slot}便量"] = stool_amount
+        excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
+
+        if urine_amount != "なし":
+            urine_count += 1
+
+        if stool_amount != "なし":
+            stool_count += 1
 
     st.markdown("#### ☀️ 日中帯（9時〜17時）")
     day_cols = st.columns(3)
@@ -453,48 +507,12 @@ def build_excretion_inputs():
     for col, slot_info in zip(day_cols, EXCRETION_SLOTS[:3]):
         slot, time_label = slot_info
         with col:
-            st.markdown(
-                f"""
-                <div style='background:#FFF7EC; padding:12px; border-radius:14px; border:1px solid #E5D5BF; margin-bottom:10px;'>
-                    <b style='font-size:16px;'>{slot}</b><br>
-                    <span style='font-size:12px; color:#666;'>{time_label}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            slot_card(
+                slot=slot,
+                time_label=time_label,
+                card_color="#FFF7EC",
+                border_color="#E5D5BF",
             )
-
-            urine_amount = st.selectbox(
-                f"{slot} 尿量",
-                URINE_AMOUNT_OPTIONS,
-                key=f"{slot}_urine_amount",
-            )
-            urine_type = st.selectbox(
-                f"{slot} 尿性状",
-                URINE_TYPE_OPTIONS,
-                key=f"{slot}_urine_type",
-                disabled=(urine_amount == "なし"),
-            )
-            stool_amount = st.selectbox(
-                f"{slot} 便量",
-                STOOL_AMOUNT_OPTIONS,
-                key=f"{slot}_stool_amount",
-            )
-            stool_type = st.selectbox(
-                f"{slot} 便性状",
-                STOOL_TYPE_OPTIONS,
-                key=f"{slot}_stool_type",
-                disabled=(stool_amount == "なし"),
-            )
-
-            excretion_data[f"{slot}尿量"] = urine_amount
-            excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
-            excretion_data[f"{slot}便量"] = stool_amount
-            excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
-
-            if urine_amount != "なし":
-                urine_count += 1
-            if stool_amount != "なし":
-                stool_count += 1
 
     st.markdown("#### 🌙 夜間帯（18時〜翌8時）")
     night_cols = st.columns(3)
@@ -502,52 +520,20 @@ def build_excretion_inputs():
     for col, slot_info in zip(night_cols, EXCRETION_SLOTS[3:]):
         slot, time_label = slot_info
         with col:
-            st.markdown(
-                f"""
-                <div style='background:#EEF4FA; padding:12px; border-radius:14px; border:1px solid #C9D8E6; margin-bottom:10px;'>
-                    <b style='font-size:16px;'>{slot}</b><br>
-                    <span style='font-size:12px; color:#666;'>{time_label}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            slot_card(
+                slot=slot,
+                time_label=time_label,
+                card_color="#EEF4FA",
+                border_color="#C9D8E6",
             )
-
-            urine_amount = st.selectbox(
-                f"{slot} 尿量",
-                URINE_AMOUNT_OPTIONS,
-                key=f"{slot}_urine_amount",
-            )
-            urine_type = st.selectbox(
-                f"{slot} 尿性状",
-                URINE_TYPE_OPTIONS,
-                key=f"{slot}_urine_type",
-                disabled=(urine_amount == "なし"),
-            )
-            stool_amount = st.selectbox(
-                f"{slot} 便量",
-                STOOL_AMOUNT_OPTIONS,
-                key=f"{slot}_stool_amount",
-            )
-            stool_type = st.selectbox(
-                f"{slot} 便性状",
-                STOOL_TYPE_OPTIONS,
-                key=f"{slot}_stool_type",
-                disabled=(stool_amount == "なし"),
-            )
-
-            excretion_data[f"{slot}尿量"] = urine_amount
-            excretion_data[f"{slot}尿性状"] = "" if urine_amount == "なし" else urine_type
-            excretion_data[f"{slot}便量"] = stool_amount
-            excretion_data[f"{slot}便性状"] = "" if stool_amount == "なし" else stool_type
-
-            if urine_amount != "なし":
-                urine_count += 1
-            if stool_amount != "なし":
-                stool_count += 1
 
     st.info(f"自動集計：排尿 {urine_count} 回 ／ 排便 {stool_count} 回")
-    return urine_count, stool_count, excretion_data
 
+    with st.expander("保存される排泄詳細を確認する"):
+        preview = pd.DataFrame([excretion_data])
+        st.dataframe(preview, use_container_width=True, hide_index=True)
+
+    return urine_count, stool_count, excretion_data
 
 def build_excretion_summary_text(target):
     """排泄詳細を家族向け・管理者向けに簡潔にまとめる。"""
@@ -1921,7 +1907,7 @@ elif menu == "健康チェック入力":
         }
 
         append_record(record)
-        st.success("登録しました。Excelデータに保存されています。")
+        st.success("登録しました。排泄詳細もExcelデータに保存されています。")
 
 
 # =========================
@@ -1994,6 +1980,41 @@ elif menu == "過去データ管理":
 
     st.subheader("検索結果")
     st.dataframe(result, use_container_width=True)
+
+    if not result.empty:
+        excretion_cols = [
+            "記録日",
+            "利用者名",
+            "排尿回数",
+            "排便回数",
+            "午前尿量",
+            "午前尿性状",
+            "午前便量",
+            "午前便性状",
+            "午後尿量",
+            "午後尿性状",
+            "午後便量",
+            "午後便性状",
+            "夕方尿量",
+            "夕方尿性状",
+            "夕方便量",
+            "夕方便性状",
+            "夜尿量",
+            "夜尿性状",
+            "夜便量",
+            "夜便性状",
+            "深夜尿量",
+            "深夜尿性状",
+            "深夜便量",
+            "深夜便性状",
+            "朝方尿量",
+            "朝方尿性状",
+            "朝方便量",
+            "朝方便性状",
+        ]
+        visible_cols = [c for c in excretion_cols if c in result.columns]
+        with st.expander("排泄詳細だけを確認する", expanded=False):
+            st.dataframe(result[visible_cols], use_container_width=True, hide_index=True)
 
     if result.empty:
         st.warning("該当するデータがありません。")
