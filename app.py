@@ -643,6 +643,262 @@ def build_excretion_text(df):
     return "\n".join(lines)
 
 
+
+# =========================
+# 入力チェック・注意通知・差分検知
+# =========================
+def validate_health_record(record):
+    """健康チェック入力の整合性を確認する。"""
+    warnings = []
+    errors = []
+
+    temp = safe_float(record.get("体温"), 0)
+    spo2 = safe_int(record.get("SpO2"), 0)
+    bp_high = safe_int(record.get("血圧上"), 0)
+    bp_low = safe_int(record.get("血圧下"), 0)
+    pulse = safe_int(record.get("脈拍"), 0)
+    weight = safe_float(record.get("体重"), 0)
+
+    if temp == 0:
+        warnings.append("体温が0です。未測定の場合はそのままでもよいですが、入力漏れでないか確認してください。")
+    elif temp < 34.0 or temp > 42.0:
+        errors.append("体温が通常の入力範囲から外れています。入力値を確認してください。")
+    elif temp >= 37.5:
+        warnings.append("体温が37.5℃以上です。発熱傾向として申し送り対象になります。")
+
+    if spo2 == 0:
+        warnings.append("SpO2が0です。未測定か入力漏れか確認してください。")
+    elif spo2 < 80:
+        errors.append("SpO2が80未満です。入力ミスの可能性があります。")
+    elif spo2 <= 93:
+        warnings.append("SpO2が93％以下です。注意して確認してください。")
+
+    if bp_high == 0 or bp_low == 0:
+        warnings.append("血圧が0です。未測定か入力漏れか確認してください。")
+    elif bp_low > bp_high:
+        errors.append("血圧下が血圧上を上回っています。入力値を確認してください。")
+    elif bp_high >= 160:
+        warnings.append("血圧上が160以上です。注意して確認してください。")
+
+    if pulse == 0:
+        warnings.append("脈拍が0です。未測定か入力漏れか確認してください。")
+    elif pulse < 40 or pulse > 130:
+        warnings.append("脈拍が通常範囲から外れています。入力値と状態を確認してください。")
+
+    if weight < 0:
+        errors.append("体重がマイナスです。入力値を確認してください。")
+
+    for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+        value = safe_int(record.get(meal), 0)
+        if value < 0 or value > 100:
+            errors.append(f"{meal}は0〜100％で入力してください。")
+        elif value <= 50:
+            warnings.append(f"{meal}が50％以下です。食事量低下として確認してください。")
+
+    return errors, warnings
+
+
+def validate_excretion_record(record):
+    """排泄チェック入力の整合性を確認する。"""
+    warnings = []
+    errors = []
+
+    urine_amount = clean_text(record.get("尿量", "なし"), "なし")
+    urine_type = clean_text(record.get("尿性状", "なし"), "なし")
+    stool_amount = clean_text(record.get("便量", "なし"), "なし")
+    stool_type = clean_text(record.get("便性状", "なし"), "なし")
+
+    if urine_amount == "なし" and urine_type != "なし":
+        errors.append("尿量が「なし」の場合、尿性状も「なし」にしてください。")
+    if stool_amount == "なし" and stool_type != "なし":
+        errors.append("便量が「なし」の場合、便性状も「なし」にしてください。")
+
+    if urine_amount != "なし" and urine_type == "なし":
+        warnings.append("尿量がありますが、尿性状が「なし」です。普通尿・濃縮尿の確認をおすすめします。")
+    if stool_amount != "なし" and stool_type == "なし":
+        warnings.append("便量がありますが、便性状が「なし」です。普通便・下痢便・水様便の確認をおすすめします。")
+
+    if urine_type == "濃縮尿":
+        warnings.append("濃縮尿の記録があります。水分摂取や体調変化の確認対象です。")
+    if stool_type in ["下痢便", "水様便"]:
+        warnings.append(f"{stool_type}の記録があります。体調変化として確認対象です。")
+
+    return errors, warnings
+
+
+def get_previous_health_record(health_df, record_date, user_name):
+    """指定日より前の直近健康記録を取得する。"""
+    if health_df.empty:
+        return None
+
+    work = health_df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+    target_date = pd.to_datetime(record_date, errors="coerce")
+
+    if pd.isna(target_date):
+        return None
+
+    work = work[
+        (work["利用者名"] == user_name)
+        & (work["記録日"].dt.date < target_date.date())
+    ].sort_values("記録日")
+
+    if work.empty:
+        return None
+
+    return work.iloc[-1]
+
+
+def build_health_diff_text(health_df, record_date, user_name, current_record=None):
+    """前回記録との差分を文章化する。"""
+    prev = get_previous_health_record(health_df, record_date, user_name)
+
+    if prev is None:
+        return "前回比較：比較できる過去記録はありません。"
+
+    if current_record is None:
+        idx = find_health_index(health_df, record_date, user_name)
+        if idx is None:
+            return "前回比較：本日の健康記録がありません。"
+        current_record = health_df.loc[idx].to_dict()
+
+    lines = []
+
+    checks = [
+        ("体温", 0.5, "℃"),
+        ("SpO2", 3, "％"),
+        ("体重", 1.0, "kg"),
+        ("朝食摂取率", 30, "％"),
+        ("昼食摂取率", 30, "％"),
+        ("夕食摂取率", 30, "％"),
+    ]
+
+    for col, threshold, unit in checks:
+        now = safe_float(current_record.get(col), 0)
+        before = safe_float(prev.get(col), 0)
+
+        if now == 0 or before == 0:
+            continue
+
+        diff = now - before
+
+        if abs(diff) >= threshold:
+            direction = "上昇" if diff > 0 else "低下"
+            lines.append(f"{col}が前回より{abs(round(diff, 1))}{unit}{direction}")
+
+    if not lines:
+        return "前回比較：大きな差分は目立ちません。"
+
+    return "前回比較：" + "、".join(lines)
+
+
+def build_excretion_diff_text(ex_df, record_date, user_name):
+    """前回排泄記録との差分を文章化する。"""
+    if ex_df.empty:
+        return "排泄差分：比較できる過去記録はありません。"
+
+    work = ex_df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+    target_date = pd.to_datetime(record_date, errors="coerce")
+
+    if pd.isna(target_date):
+        return "排泄差分：日付を確認できません。"
+
+    today_df = get_day_excretion_data(work, target_date.date(), user_name)
+
+    prev_dates = work[
+        (work["利用者名"] == user_name)
+        & (work["記録日"].dt.date < target_date.date())
+    ]["記録日"].dt.date.dropna().unique()
+
+    if len(prev_dates) == 0:
+        return "排泄差分：比較できる過去排泄記録はありません。"
+
+    prev_date = sorted(prev_dates)[-1]
+    prev_df = get_day_excretion_data(work, prev_date, user_name)
+
+    now_sum = summarize_excretion(today_df)
+    prev_sum = summarize_excretion(prev_df)
+
+    lines = []
+
+    if now_sum["排尿回数"] > prev_sum["排尿回数"] + 2:
+        lines.append("排尿回数が前回より増えています")
+    if now_sum["排便回数"] == 0 and prev_sum["排便回数"] > 0:
+        lines.append("前回は排便記録がありましたが、本日は排便記録がありません")
+    if now_sum["濃縮尿"] > prev_sum["濃縮尿"]:
+        lines.append("濃縮尿の記録が前回より増えています")
+    if now_sum["下痢便"] + now_sum["水様便"] > prev_sum["下痢便"] + prev_sum["水様便"]:
+        lines.append("下痢便・水様便の記録が前回より増えています")
+
+    if not lines:
+        return "排泄差分：前回と比べて大きな変化は目立ちません。"
+
+    return "排泄差分：" + "、".join(lines)
+
+
+def build_attention_users(health_df, ex_df, target_date):
+    """今日の注意利用者一覧を作成する。"""
+    rows = []
+
+    for user in active_users:
+        notes = []
+
+        # 健康記録
+        if not health_df.empty:
+            idx = find_health_index(health_df, target_date, user)
+            if idx is not None:
+                h = health_df.loc[idx]
+                if safe_float(h.get("体温"), 0) >= 37.5:
+                    notes.append("発熱傾向")
+                if safe_int(h.get("SpO2"), 100) <= 93 and safe_int(h.get("SpO2"), 100) != 0:
+                    notes.append("SpO2低下")
+                for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+                    if safe_int(h.get(meal), 100) <= 50:
+                        notes.append(f"{meal.replace('摂取率','')}50％以下")
+                if clean_text(h.get("気になる変化", "")):
+                    notes.append("気になる変化あり")
+
+        # 排泄記録
+        user_ex = get_day_excretion_data(ex_df, target_date, user)
+        if not user_ex.empty:
+            ex_sum = summarize_excretion(user_ex)
+            if ex_sum["水様便"] > 0:
+                notes.append("水様便")
+            if ex_sum["下痢便"] > 0:
+                notes.append("下痢便")
+            if ex_sum["濃縮尿"] > 0:
+                notes.append("濃縮尿")
+            if ex_sum["排便回数"] == 0:
+                notes.append("本日排便記録なし")
+
+        # 未排便3日
+        if not ex_df.empty:
+            work = ex_df.copy()
+            work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+            recent_dates = sorted([
+                d for d in work[work["利用者名"] == user]["記録日"].dt.date.dropna().unique()
+                if d <= target_date
+            ])[-3:]
+
+            if len(recent_dates) >= 3:
+                no_stool_all = True
+                for d in recent_dates:
+                    ddf = get_day_excretion_data(work, d, user)
+                    if summarize_excretion(ddf)["排便回数"] > 0:
+                        no_stool_all = False
+                        break
+                if no_stool_all:
+                    notes.append("未排便3日")
+
+        if notes:
+            rows.append({
+                "利用者名": user,
+                "注意項目": "、".join(sorted(set(notes))),
+            })
+
+    return pd.DataFrame(rows)
+
 # =========================
 # レポート系
 # =========================
@@ -873,6 +1129,22 @@ def create_handover_text(health_df, excretion_df, target_date):
                 lines.append("・" + "、".join(alerts))
                 lines.append("")
 
+    diff_lines = []
+    for user in active_users:
+        hdiff = build_health_diff_text(health_df, target_date, user)
+        ediff = build_excretion_diff_text(excretion_df, target_date, user)
+
+        if "大きな差分は目立ちません" not in hdiff and "比較できる過去記録はありません" not in hdiff and "本日の健康記録がありません" not in hdiff:
+            diff_lines.append(f"■ {user} {hdiff}")
+
+        if "大きな変化は目立ちません" not in ediff and "比較できる過去排泄記録はありません" not in ediff:
+            diff_lines.append(f"■ {user} {ediff}")
+
+    if diff_lines:
+        lines.append("【前回との差分】")
+        lines.extend(diff_lines)
+        lines.append("")
+
     if len(lines) <= 3:
         lines.append("記録上、特に申し送り対象となるメモや注意目安はありません。")
 
@@ -963,6 +1235,37 @@ def apply_design():
             border: 1px solid rgba(0,0,0,0.08);
             margin-bottom: 12px;
         }}
+        div[data-testid="stButton"] button {{
+            min-height: 44px;
+            border-radius: 12px;
+            font-weight: 600;
+        }}
+        div[data-baseweb="select"] > div {{
+            min-height: 44px;
+            border-radius: 10px;
+        }}
+        input, textarea {{
+            border-radius: 10px !important;
+        }}
+        @media (max-width: 768px) {{
+            section.main > div {{
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+            }}
+            h1 {{
+                font-size: 1.55rem !important;
+            }}
+            h2 {{
+                font-size: 1.25rem !important;
+            }}
+            h3 {{
+                font-size: 1.1rem !important;
+            }}
+            div[data-testid="column"] {{
+                width: 100% !important;
+                flex: 1 1 100% !important;
+            }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1045,6 +1348,14 @@ if menu == "管理者ダッシュボード":
 
     ex_sum = summarize_excretion(today_excretion)
     col4.metric("本日の排便記録", ex_sum["排便回数"])
+
+    st.subheader("今日の注意利用者")
+    attention_df = build_attention_users(health_df, ex_df, today)
+    if attention_df.empty:
+        st.success("今日の注意利用者はありません。")
+    else:
+        st.warning("確認したい利用者がいます。")
+        st.dataframe(attention_df, use_container_width=True, hide_index=True)
 
     st.subheader("本日の申し送り支援")
     st.text_area(
@@ -1184,9 +1495,25 @@ elif menu == "健康チェック入力":
             "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "入力者": input_staff,
         }
-        action = upsert_health_record(record)
-        st.success(f"健康チェックを{action}しました。")
-        st.rerun()
+
+        errors, warnings = validate_health_record(record)
+
+        if errors:
+            st.error("保存できません。入力内容を確認してください。")
+            for msg in errors:
+                st.error(msg)
+        else:
+            if warnings:
+                st.warning("保存前確認があります。")
+                for msg in warnings:
+                    st.warning(msg)
+
+            diff_text = build_health_diff_text(health_df, record_date, user_name, record)
+            st.info(diff_text)
+
+            action = upsert_health_record(record)
+            st.success(f"健康チェックを{action}しました。")
+            st.rerun()
 
 
 # =========================
@@ -1380,12 +1707,33 @@ elif menu == "排泄チェック入力":
         submitted = st.form_submit_button("排泄チェックを登録・更新する")
 
     if submitted:
-        actions = []
-        for record in records_to_save:
-            actions.append(upsert_excretion_record(record))
+        all_errors = []
+        all_warnings = []
 
-        st.success("排泄チェックを保存しました。時間帯ごとに登録・更新されています。")
-        st.rerun()
+        for record in records_to_save:
+            errors, warnings = validate_excretion_record(record)
+            for msg in errors:
+                all_errors.append(f"{record['時間帯']}：{msg}")
+            for msg in warnings:
+                all_warnings.append(f"{record['時間帯']}：{msg}")
+
+        if all_errors:
+            st.error("保存できません。排泄入力内容を確認してください。")
+            for msg in all_errors:
+                st.error(msg)
+        else:
+            if all_warnings:
+                st.warning("保存前確認があります。")
+                for msg in all_warnings:
+                    st.warning(msg)
+
+            actions = []
+            for record in records_to_save:
+                actions.append(upsert_excretion_record(record))
+
+            st.info(build_excretion_diff_text(load_excretion_data(), record_date, user_name))
+            st.success("排泄チェックを保存しました。時間帯ごとに登録・更新されています。")
+            st.rerun()
 
     st.subheader("この日の排泄記録")
     day_data = get_day_excretion_data(load_excretion_data(), record_date, user_name)
@@ -1772,7 +2120,7 @@ elif menu == "管理者支援":
     health_df = load_health_data()
     ex_df = load_excretion_data()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["AI家族レポート", "バイタル推移グラフ", "ChatGPT連携", "申し送り支援"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["AI家族レポート", "バイタル推移グラフ", "ChatGPT連携", "申し送り支援", "注意通知"])
 
     with tab1:
         st.subheader("AI家族レポート自動文章")
@@ -1853,6 +2201,19 @@ elif menu == "管理者支援":
         target_date = st.date_input("対象日", value=date.today(), key="handover_date")
         handover = create_handover_text(health_df, ex_df, target_date)
         st.text_area("申し送り案", value=handover, height=360)
+
+    with tab5:
+        st.subheader("注意通知")
+        alert_date = st.date_input("注意通知の対象日", value=date.today(), key="alert_date")
+        alert_df = build_attention_users(health_df, ex_df, alert_date)
+
+        if alert_df.empty:
+            st.success("対象日の注意通知はありません。")
+        else:
+            st.warning("確認したい注意通知があります。")
+            st.dataframe(alert_df, use_container_width=True, hide_index=True)
+
+        st.caption("注意通知は診断ではなく、記録に基づく確認支援です。")
 
 
 # =========================
