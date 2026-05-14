@@ -1258,15 +1258,10 @@ def show_hidamari_hero(mode="login"):
 
 
 def show_staff_encouragement():
-    st.markdown(
-        """
-        <div class="staff-welcome">
-            <b> お疲れ様です。</b><br>
-            今日の小さな記録が、利用者様の安心につながります。迷ったら、ありのままを短く残せば大丈夫です。 
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # 上部の「今日もお疲れ様です」カードを残すため、
+    # ここでは追加メッセージを表示しない。
+    return
+
 
 
 def show_admin_encouragement():
