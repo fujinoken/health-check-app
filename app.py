@@ -1542,10 +1542,8 @@ elif menu == "排泄チェック入力":
     # 利用者・入力者選択
     col1, col2 = st.columns(2)
     with col1:
-        # 未入力がある場合は、最初の未入力利用者を初期表示にする
-        default_user = missing_rows[0]["利用者名"] if missing_rows else active_users[0]
-        default_index = active_users.index(default_user) if default_user in active_users else 0
-        user_name = st.selectbox("利用者名", active_users, index=default_index, key="ex_input_user")
+        # 未入力一覧はページ下部へ移動したため、ここでは通常の利用者選択にする
+        user_name = st.selectbox("利用者名", active_users, key="ex_input_user")
     with col2:
         input_staff = st.text_input("入力者", placeholder="例：藤野", key="ex_input_staff")
 
