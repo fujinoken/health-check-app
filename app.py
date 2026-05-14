@@ -931,6 +931,42 @@ def build_attention_users(health_df, ex_df, target_date, settings=None):
     return pd.DataFrame(rows)
 
 
+
+def show_staff_observation_points():
+    """スタッフ画面上部に今日の観察ポイントを表示する。"""
+    if st.session_state.role != "staff":
+        return
+
+    health_df = load_health_data()
+    ex_df = load_excretion_data()
+    today = date.today()
+
+    st.subheader("今日の観察ポイント")
+    st.caption("診断ではなく、記録に基づいた見守り・申し送りの補助です。")
+
+    try:
+        points_df = build_staff_observation_points(health_df, ex_df, today)
+    except Exception as e:
+        st.warning("観察ポイントの作成中にエラーがありました。設定値を初期値に戻して再確認してください。")
+        st.caption(str(e))
+        return
+
+    if points_df.empty:
+        st.success("今日の記録上、大きな観察ポイントはまだありません。普段の様子を見守ってください。")
+    else:
+        st.warning("今日、少し意識して見守りたい利用者様がいます。")
+        st.dataframe(points_df, use_container_width=True, hide_index=True)
+
+        with st.expander("見守りの使い方"):
+            st.write(
+                "表示された内容は、診断や判断ではありません。"
+                "体調の変化を決めつけず、表情・食事・水分・排泄・動き方を少し意識して見守るための補助として使ってください。"
+            )
+
+    st.divider()
+
+
+
 # =========================
 # バックアップ
 # =========================
