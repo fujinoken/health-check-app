@@ -925,6 +925,21 @@ def build_staff_observation_points(health_df, ex_df, target_date, settings=None)
     """
     rows = []
 
+    # 観察ポイント設定を読み込み、必ず数値・真偽値に変換する
+    if settings is None:
+        settings = load_alert_settings()
+    settings = normalize_alert_settings(settings)
+
+    temp_threshold = float(settings.get("temp_threshold", 37.0))
+    spo2_threshold = int(settings.get("spo2_threshold", 92))
+    meal_threshold = int(settings.get("meal_threshold", 50))
+    meal_drop_threshold = int(settings.get("meal_drop_threshold", 30))
+    constipation_days = int(settings.get("constipation_days", 3))
+    check_concentrated_urine = bool(settings.get("check_concentrated_urine", True))
+    check_diarrhea = bool(settings.get("check_diarrhea", True))
+    check_watery_stool = bool(settings.get("check_watery_stool", True))
+    check_change_note = bool(settings.get("check_change_note", True))
+
     for user in active_users:
         points = []
         supports = []
