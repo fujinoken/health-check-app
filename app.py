@@ -29,7 +29,7 @@ except Exception:
 # =========================
 st.set_page_config(
     page_title="ひだまり 健康チェック管理システム",
-    page_icon="🌿",
+    page_icon="",
     layout="wide",
 )
 
@@ -1261,8 +1261,8 @@ def show_staff_encouragement():
     st.markdown(
         """
         <div class="staff-welcome">
-            <b>👩‍⚕️ お疲れ様です。</b><br>
-            今日の小さな記録が、利用者様の安心につながります。迷ったら、ありのままを短く残せば大丈夫です。 🐶
+            <b> お疲れ様です。</b><br>
+            今日の小さな記録が、利用者様の安心につながります。迷ったら、ありのままを短く残せば大丈夫です。 
         </div>
         """,
         unsafe_allow_html=True,
@@ -1273,7 +1273,7 @@ def show_admin_encouragement():
     st.markdown(
         """
         <div class="admin-welcome">
-            <b>🌿 管理者モードです。</b><br>
+            <b> 管理者モードです。</b><br>
             入力状況、注意記録、申し送りを確認できます。現場の気づきを、管理の力に変えていきましょう。
         </div>
         """,
@@ -1377,15 +1377,6 @@ def apply_design():
             box-shadow: 0 10px 28px rgba(55, 64, 58, 0.08);
             position: relative;
             overflow: hidden;
-        }}
-        .hidamari-hero:before {{
-            content: "🌿";
-            position: absolute;
-            font-size: 88px;
-            opacity: 0.12;
-            top: -18px;
-            right: 28px;
-            transform: rotate(-12deg);
         }}
         .hidamari-hero-title {{
             font-size: 2.25rem;
@@ -1601,7 +1592,7 @@ elif menu == "健康チェック入力":
     st.header("健康チェック入力")
 
     if st.session_state.role == "staff":
-        st.markdown("### 👩‍⚕️ 健康チェック入力")
+        st.markdown("###  健康チェック入力")
         st.write("バイタルと食事の様子を、今日の記録として残します。")
 
     if not active_users:
@@ -1740,7 +1731,7 @@ elif menu == "排泄チェック入力":
     st.caption("排泄記録は健康チェックとは別データとして保存します。キーは「記録日＋利用者名＋時間帯」です。")
 
     if st.session_state.role == "staff":
-        st.markdown("### 🐶 排泄チェック入力")
+        st.markdown("###  排泄チェック入力")
         st.write("時間帯ごとに、尿・便の様子をワンタップ感覚で記録します。")
 
     if not active_users:
@@ -1875,14 +1866,14 @@ elif menu == "排泄チェック入力":
                 "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             })
 
-        st.markdown("#### ☀️ 日中帯（9時〜17時）")
+        st.markdown("####  日中帯（9時〜17時）")
         day_cols = st.columns(3)
 
         for col, (slot, time_label) in zip(day_cols, EXCRETION_SLOTS[:3]):
             with col:
                 render_slot(slot, time_label, "#FFF7EC", "#E5D5BF")
 
-        st.markdown("#### 🌙 夜間帯（18時〜翌8時）")
+        st.markdown("####  夜間帯（18時〜翌8時）")
         night_cols = st.columns(3)
 
         for col, (slot, time_label) in zip(night_cols, EXCRETION_SLOTS[3:]):
