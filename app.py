@@ -1587,7 +1587,6 @@ elif menu == "健康チェック入力":
     st.header("健康チェック入力")
 
     if st.session_state.role == "staff":
-        st.markdown("###  健康チェック入力")
         st.write("バイタルと食事の様子を、今日の記録として残します。")
 
     if not active_users:
