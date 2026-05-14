@@ -1518,6 +1518,7 @@ elif menu == "健康チェック入力":
 
 # =========================
 # 排泄チェック入力
+# 未入力チェック一覧＋スマホ用ワンタップ風UI
 # =========================
 elif menu == "排泄チェック入力":
     st.header("排泄チェック入力")
@@ -1525,21 +1526,81 @@ elif menu == "排泄チェック入力":
 
     if st.session_state.role == "staff":
         st.markdown("### お疲れ様です。")
-        st.write("排泄状況を時間帯ごとに入力してください。")
+        st.write("排泄状況を時間帯ごとに入力してください。未入力の確認もこの画面でできます。")
 
     if not active_users:
         st.warning("利用者マスタに表示中の利用者がいません。")
         st.stop()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    ex_df = load_excretion_data()
+
+    # まず日付を選ぶ。日付が変わると未入力一覧も切り替わる。
+    top1, top2 = st.columns([1, 2])
+    with top1:
         record_date = st.date_input("記録日", value=date.today(), key="ex_input_date")
+
+    # 未入力チェック一覧
+    st.subheader("未入力チェック一覧")
+
+    missing_rows = []
+    completed_rows = []
+
+    for user in active_users:
+        for slot, time_label in EXCRETION_SLOTS:
+            row = get_excretion_row(ex_df, record_date, user, slot)
+            if row is None:
+                missing_rows.append(
+                    {
+                        "利用者名": user,
+                        "時間帯": slot,
+                        "時間帯目安": time_label,
+                        "状態": "未入力",
+                    }
+                )
+            else:
+                completed_rows.append(
+                    {
+                        "利用者名": user,
+                        "時間帯": slot,
+                        "時間帯目安": time_label,
+                        "状態": "入力済み",
+                    }
+                )
+
+    total_count = len(active_users) * len(EXCRETION_SLOTS)
+    completed_count = len(completed_rows)
+    missing_count = len(missing_rows)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("必要記録数", total_count)
+    m2.metric("入力済み", completed_count)
+    m3.metric("未入力", missing_count)
+
+    if missing_rows:
+        st.warning("未入力の排泄記録があります。")
+        with st.expander("未入力一覧を表示する", expanded=True):
+            st.dataframe(pd.DataFrame(missing_rows), use_container_width=True, hide_index=True)
+    else:
+        st.success("この日の排泄記録はすべて入力済みです。")
+
+    with st.expander("入力済み一覧を表示する", expanded=False):
+        if completed_rows:
+            st.dataframe(pd.DataFrame(completed_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("この日の入力済み記録はまだありません。")
+
+    st.divider()
+
+    # 利用者・入力者選択
+    col1, col2 = st.columns(2)
+    with col1:
+        # 未入力がある場合は、最初の未入力利用者を初期表示にする
+        default_user = missing_rows[0]["利用者名"] if missing_rows else active_users[0]
+        default_index = active_users.index(default_user) if default_user in active_users else 0
+        user_name = st.selectbox("利用者名", active_users, index=default_index, key="ex_input_user")
     with col2:
-        user_name = st.selectbox("利用者名", active_users, key="ex_input_user")
-    with col3:
         input_staff = st.text_input("入力者", placeholder="例：藤野", key="ex_input_staff")
 
-    ex_df = load_excretion_data()
     day_data = get_day_excretion_data(ex_df, record_date, user_name)
 
     if day_data.empty:
@@ -1563,146 +1624,109 @@ elif menu == "排泄チェック入力":
             unsafe_allow_html=True,
         )
 
+    # スマホ用ワンタップ風UI
+    st.caption("尿量・便量は横並びボタン風に選べます。スマホでも押しやすいようにしています。")
+
     with st.form("excretion_form", clear_on_submit=False):
         records_to_save = []
+
+        def one_tap_radio(label, options, index, key):
+            return st.radio(
+                label,
+                options,
+                index=index,
+                horizontal=True,
+                key=key,
+            )
+
+        def render_slot(slot, time_label, card_color, border_color):
+            existing = get_excretion_row(ex_df, record_date, user_name, slot)
+            sig = "new" if existing is None else hashlib.md5(str(existing.to_dict()).encode("utf-8")).hexdigest()[:8]
+            key_base = f"ex_{record_date}_{user_name}_{slot}_{sig}"
+
+            st.markdown(
+                f"""
+                <div style='background:{card_color}; padding:12px; border-radius:14px; border:1px solid {border_color}; margin-bottom:10px;'>
+                    <b style='font-size:16px;'>{slot}</b><br>
+                    <span style='font-size:12px; color:#666;'>{time_label}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            urine_amount_default = existing.get("尿量", "なし") if existing is not None else "なし"
+            urine_type_default = existing.get("尿性状", "なし") if existing is not None else "なし"
+            stool_amount_default = existing.get("便量", "なし") if existing is not None else "なし"
+            stool_type_default = existing.get("便性状", "なし") if existing is not None else "なし"
+
+            urine_amount = one_tap_radio(
+                f"{slot} 尿量",
+                URINE_AMOUNT_OPTIONS,
+                get_option_index(URINE_AMOUNT_OPTIONS, urine_amount_default),
+                f"{key_base}_urine_amount",
+            )
+
+            urine_type = one_tap_radio(
+                f"{slot} 尿性状",
+                URINE_TYPE_OPTIONS,
+                get_option_index(URINE_TYPE_OPTIONS, urine_type_default),
+                f"{key_base}_urine_type",
+            )
+
+            stool_amount = one_tap_radio(
+                f"{slot} 便量",
+                STOOL_AMOUNT_OPTIONS,
+                get_option_index(STOOL_AMOUNT_OPTIONS, stool_amount_default),
+                f"{key_base}_stool_amount",
+            )
+
+            stool_type = one_tap_radio(
+                f"{slot} 便性状",
+                STOOL_TYPE_OPTIONS,
+                get_option_index(STOOL_TYPE_OPTIONS, stool_type_default),
+                f"{key_base}_stool_type",
+            )
+
+            memo = st.text_area(
+                f"{slot} メモ",
+                value=existing.get("排泄メモ", "") if existing is not None else "",
+                key=f"{key_base}_memo",
+                height=70,
+                placeholder="必要時のみ入力",
+            )
+
+            if urine_amount == "なし":
+                urine_type = "なし"
+            if stool_amount == "なし":
+                stool_type = "なし"
+
+            records_to_save.append({
+                "記録日": record_date,
+                "利用者名": user_name,
+                "時間帯": slot,
+                "時間帯目安": time_label,
+                "尿量": urine_amount,
+                "尿性状": urine_type,
+                "便量": stool_amount,
+                "便性状": stool_type,
+                "排泄メモ": memo,
+                "入力者": input_staff,
+                "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
 
         st.markdown("#### ☀️ 日中帯（9時〜17時）")
         day_cols = st.columns(3)
 
         for col, (slot, time_label) in zip(day_cols, EXCRETION_SLOTS[:3]):
-            existing = get_excretion_row(ex_df, record_date, user_name, slot)
-            sig = "new" if existing is None else hashlib.md5(str(existing.to_dict()).encode("utf-8")).hexdigest()[:8]
-            key_base = f"ex_{record_date}_{user_name}_{slot}_{sig}"
-
             with col:
-                st.markdown(
-                    f"""
-                    <div style='background:#FFF7EC; padding:12px; border-radius:14px; border:1px solid #E5D5BF; margin-bottom:10px;'>
-                        <b style='font-size:16px;'>{slot}</b><br>
-                        <span style='font-size:12px; color:#666;'>{time_label}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                urine_amount = st.selectbox(
-                    f"{slot} 尿量",
-                    URINE_AMOUNT_OPTIONS,
-                    index=get_option_index(URINE_AMOUNT_OPTIONS, existing.get("尿量", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_urine_amount",
-                )
-                urine_type = st.selectbox(
-                    f"{slot} 尿性状",
-                    URINE_TYPE_OPTIONS,
-                    index=get_option_index(URINE_TYPE_OPTIONS, existing.get("尿性状", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_urine_type",
-                )
-                stool_amount = st.selectbox(
-                    f"{slot} 便量",
-                    STOOL_AMOUNT_OPTIONS,
-                    index=get_option_index(STOOL_AMOUNT_OPTIONS, existing.get("便量", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_stool_amount",
-                )
-                stool_type = st.selectbox(
-                    f"{slot} 便性状",
-                    STOOL_TYPE_OPTIONS,
-                    index=get_option_index(STOOL_TYPE_OPTIONS, existing.get("便性状", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_stool_type",
-                )
-                memo = st.text_area(
-                    f"{slot} メモ",
-                    value=existing.get("排泄メモ", "") if existing is not None else "",
-                    key=f"{key_base}_memo",
-                    height=80,
-                )
-
-                if urine_amount == "なし":
-                    urine_type = "なし"
-                if stool_amount == "なし":
-                    stool_type = "なし"
-
-                records_to_save.append({
-                    "記録日": record_date,
-                    "利用者名": user_name,
-                    "時間帯": slot,
-                    "時間帯目安": time_label,
-                    "尿量": urine_amount,
-                    "尿性状": urine_type,
-                    "便量": stool_amount,
-                    "便性状": stool_type,
-                    "排泄メモ": memo,
-                    "入力者": input_staff,
-                    "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                })
+                render_slot(slot, time_label, "#FFF7EC", "#E5D5BF")
 
         st.markdown("#### 🌙 夜間帯（18時〜翌8時）")
         night_cols = st.columns(3)
 
         for col, (slot, time_label) in zip(night_cols, EXCRETION_SLOTS[3:]):
-            existing = get_excretion_row(ex_df, record_date, user_name, slot)
-            sig = "new" if existing is None else hashlib.md5(str(existing.to_dict()).encode("utf-8")).hexdigest()[:8]
-            key_base = f"ex_{record_date}_{user_name}_{slot}_{sig}"
-
             with col:
-                st.markdown(
-                    f"""
-                    <div style='background:#EEF4FA; padding:12px; border-radius:14px; border:1px solid #C9D8E6; margin-bottom:10px;'>
-                        <b style='font-size:16px;'>{slot}</b><br>
-                        <span style='font-size:12px; color:#666;'>{time_label}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                urine_amount = st.selectbox(
-                    f"{slot} 尿量",
-                    URINE_AMOUNT_OPTIONS,
-                    index=get_option_index(URINE_AMOUNT_OPTIONS, existing.get("尿量", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_urine_amount",
-                )
-                urine_type = st.selectbox(
-                    f"{slot} 尿性状",
-                    URINE_TYPE_OPTIONS,
-                    index=get_option_index(URINE_TYPE_OPTIONS, existing.get("尿性状", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_urine_type",
-                )
-                stool_amount = st.selectbox(
-                    f"{slot} 便量",
-                    STOOL_AMOUNT_OPTIONS,
-                    index=get_option_index(STOOL_AMOUNT_OPTIONS, existing.get("便量", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_stool_amount",
-                )
-                stool_type = st.selectbox(
-                    f"{slot} 便性状",
-                    STOOL_TYPE_OPTIONS,
-                    index=get_option_index(STOOL_TYPE_OPTIONS, existing.get("便性状", "なし") if existing is not None else "なし"),
-                    key=f"{key_base}_stool_type",
-                )
-                memo = st.text_area(
-                    f"{slot} メモ",
-                    value=existing.get("排泄メモ", "") if existing is not None else "",
-                    key=f"{key_base}_memo",
-                    height=80,
-                )
-
-                if urine_amount == "なし":
-                    urine_type = "なし"
-                if stool_amount == "なし":
-                    stool_type = "なし"
-
-                records_to_save.append({
-                    "記録日": record_date,
-                    "利用者名": user_name,
-                    "時間帯": slot,
-                    "時間帯目安": time_label,
-                    "尿量": urine_amount,
-                    "尿性状": urine_type,
-                    "便量": stool_amount,
-                    "便性状": stool_type,
-                    "排泄メモ": memo,
-                    "入力者": input_staff,
-                    "登録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                })
+                render_slot(slot, time_label, "#EEF4FA", "#C9D8E6")
 
         submitted = st.form_submit_button("排泄チェックを登録・更新する")
 
@@ -1727,9 +1751,8 @@ elif menu == "排泄チェック入力":
                 for msg in all_warnings:
                     st.warning(msg)
 
-            actions = []
             for record in records_to_save:
-                actions.append(upsert_excretion_record(record))
+                upsert_excretion_record(record)
 
             st.info(build_excretion_diff_text(load_excretion_data(), record_date, user_name))
             st.success("排泄チェックを保存しました。時間帯ごとに登録・更新されています。")
