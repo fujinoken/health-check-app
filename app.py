@@ -839,97 +839,233 @@ def build_excretion_diff_text(ex_df, record_date, user_name):
     return "排泄差分：" + "、".join(lines)
 
 
-def build_attention_users(health_df, ex_df, target_date, settings=None):
-    """今日の注意利用者一覧を作成する。
-    管理者の「観察ポイント設定」を参照する。
-    """
+# =========================
+# 観察ポイント設定・注意通知
+# =========================
+DEFAULT_ALERT_SETTINGS = {
+    "meal_threshold": 50,
+    "meal_drop_threshold": 30,
+    "temp_threshold": 37.0,
+    "spo2_threshold": 92,
+    "constipation_days": 3,
+    "check_concentrated_urine": True,
+    "check_diarrhea": True,
+    "check_watery_stool": True,
+    "check_change_note": True,
+}
+
+
+def normalize_alert_settings(settings=None):
+    """観察ポイント設定の型を安全に整える。"""
+    base = DEFAULT_ALERT_SETTINGS.copy()
+
+    if isinstance(settings, dict):
+        base.update(settings)
+
+    def to_int(value, default):
+        try:
+            return int(float(value))
+        except Exception:
+            return int(default)
+
+    def to_float(value, default):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def to_bool(value, default):
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ["true", "1", "yes", "on", "有効", "表示"]:
+            return True
+        if text in ["false", "0", "no", "off", "無効", "非表示"]:
+            return False
+        return bool(default)
+
+    base["meal_threshold"] = to_int(base.get("meal_threshold"), DEFAULT_ALERT_SETTINGS["meal_threshold"])
+    base["meal_drop_threshold"] = to_int(base.get("meal_drop_threshold"), DEFAULT_ALERT_SETTINGS["meal_drop_threshold"])
+    base["temp_threshold"] = to_float(base.get("temp_threshold"), DEFAULT_ALERT_SETTINGS["temp_threshold"])
+    base["spo2_threshold"] = to_int(base.get("spo2_threshold"), DEFAULT_ALERT_SETTINGS["spo2_threshold"])
+    base["constipation_days"] = max(1, to_int(base.get("constipation_days"), DEFAULT_ALERT_SETTINGS["constipation_days"]))
+    base["check_concentrated_urine"] = to_bool(base.get("check_concentrated_urine"), DEFAULT_ALERT_SETTINGS["check_concentrated_urine"])
+    base["check_diarrhea"] = to_bool(base.get("check_diarrhea"), DEFAULT_ALERT_SETTINGS["check_diarrhea"])
+    base["check_watery_stool"] = to_bool(base.get("check_watery_stool"), DEFAULT_ALERT_SETTINGS["check_watery_stool"])
+    base["check_change_note"] = to_bool(base.get("check_change_note"), DEFAULT_ALERT_SETTINGS["check_change_note"])
+
+    return base
+
+
+def save_alert_settings(settings):
+    """観察ポイント設定を保存する。"""
+    ensure_dirs()
+    settings = normalize_alert_settings(settings)
+    rows = [{"key": k, "value": v} for k, v in settings.items()]
+    pd.DataFrame(rows).to_excel(ALERT_SETTINGS_FILE, index=False)
+
+
+def load_alert_settings():
+    """観察ポイント設定を読み込む。壊れていても初期値で復旧する。"""
+    ensure_dirs()
+
+    if not ALERT_SETTINGS_FILE.exists():
+        settings = normalize_alert_settings(DEFAULT_ALERT_SETTINGS)
+        save_alert_settings(settings)
+        return settings
+
+    try:
+        df = pd.read_excel(ALERT_SETTINGS_FILE)
+        settings = DEFAULT_ALERT_SETTINGS.copy()
+
+        if not df.empty and "key" in df.columns and "value" in df.columns:
+            for _, row in df.iterrows():
+                key = clean_text(row.get("key", ""))
+                if key in settings:
+                    settings[key] = row.get("value")
+
+        settings = normalize_alert_settings(settings)
+        return settings
+
+    except Exception:
+        settings = normalize_alert_settings(DEFAULT_ALERT_SETTINGS)
+        try:
+            save_alert_settings(settings)
+        except Exception:
+            pass
+        return settings
+
+
+def _recent_no_stool_days(ex_df, user, target_date, days):
+    """直近日数分、排便記録がないかを確認する。"""
+    if ex_df.empty:
+        return False
+
+    work = ex_df.copy()
+    work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+
+    recent_dates = sorted([
+        d for d in work[work["利用者名"] == user]["記録日"].dt.date.dropna().unique()
+        if d <= target_date
+    ])[-days:]
+
+    if len(recent_dates) < days:
+        return False
+
+    for d in recent_dates:
+        ddf = get_day_excretion_data(work, d, user)
+        if summarize_excretion(ddf)["排便回数"] > 0:
+            return False
+
+    return True
+
+
+def build_staff_observation_points(health_df, ex_df, target_date, settings=None):
+    """スタッフ向け：今日の観察ポイントをルールベースで作成する。"""
+    settings = normalize_alert_settings(settings or load_alert_settings())
+
+    temp_threshold = float(settings["temp_threshold"])
+    spo2_threshold = int(settings["spo2_threshold"])
+    meal_threshold = int(settings["meal_threshold"])
+    meal_drop_threshold = int(settings["meal_drop_threshold"])
+    constipation_days = int(settings["constipation_days"])
+    check_concentrated_urine = bool(settings["check_concentrated_urine"])
+    check_diarrhea = bool(settings["check_diarrhea"])
+    check_watery_stool = bool(settings["check_watery_stool"])
+    check_change_note = bool(settings["check_change_note"])
+
     rows = []
 
-    if settings is None:
-        settings = load_alert_settings()
-    settings = normalize_alert_settings(settings)
-
-    temp_threshold = float(settings.get("temp_threshold", 37.0))
-    spo2_threshold = int(settings.get("spo2_threshold", 92))
-    meal_threshold = int(settings.get("meal_threshold", 50))
-    constipation_days = int(settings.get("constipation_days", 3))
-    check_concentrated_urine = bool(settings.get("check_concentrated_urine", True))
-    check_diarrhea = bool(settings.get("check_diarrhea", True))
-    check_watery_stool = bool(settings.get("check_watery_stool", True))
-    check_change_note = bool(settings.get("check_change_note", True))
-
     for user in active_users:
-        notes = []
+        points = []
+        supports = []
 
-        # 健康記録
+        # 健康チェック
         if not health_df.empty:
             idx = find_health_index(health_df, target_date, user)
 
             if idx is not None:
-                h = health_df.loc[idx]
+                current_health = health_df.loc[idx]
 
-                if safe_float(h.get("体温"), 0) >= temp_threshold:
-                    notes.append("発熱傾向")
+                temp = safe_float(current_health.get("体温"), 0)
+                spo2 = safe_int(current_health.get("SpO2"), 0)
 
-                if safe_int(h.get("SpO2"), 100) <= spo2_threshold and safe_int(h.get("SpO2"), 100) != 0:
-                    notes.append("SpO2低下")
+                if temp >= temp_threshold:
+                    points.append(f"体温 {temp}℃")
+                    supports.append("体温・表情・活気の変化を確認")
+
+                if spo2 != 0 and spo2 <= spo2_threshold:
+                    points.append(f"SpO2 {spo2}%")
+                    supports.append("呼吸状態・顔色・動作時の様子を確認")
 
                 for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
-                    if safe_int(h.get(meal), 100) <= meal_threshold:
-                        notes.append(f"{meal.replace('摂取率','')}低下")
+                    value = safe_int(current_health.get(meal), 100)
+                    if value <= meal_threshold:
+                        meal_name = meal.replace("摂取率", "")
+                        points.append(f"{meal_name} {value}%")
+                        supports.append("食事量・水分量・むせ・眠気を確認")
 
-                if check_change_note and clean_text(h.get("気になる変化", "")):
-                    notes.append("気になる変化あり")
+                if check_change_note and clean_text(current_health.get("気になる変化", "")):
+                    points.append("気になる変化あり")
+                    supports.append("記録内容を申し送りで共有")
 
-        # 排泄記録
+                # 前回より食事低下
+                prev = get_previous_health_record(health_df, target_date, user)
+
+                if prev is not None:
+                    for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+                        now = safe_int(current_health.get(meal), 0)
+                        before = safe_int(prev.get(meal), 0)
+
+                        if before > 0 and now > 0 and before - now >= meal_drop_threshold:
+                            meal_name = meal.replace("摂取率", "")
+                            points.append(f"{meal_name}が前回より{before - now}%低下")
+                            supports.append("普段との違いとして食事中の様子を確認")
+
+        # 排泄チェック
         user_ex = get_day_excretion_data(ex_df, target_date, user)
 
         if not user_ex.empty:
             ex_sum = summarize_excretion(user_ex)
 
+            if check_concentrated_urine and ex_sum["濃縮尿"] > 0:
+                points.append("濃縮尿あり")
+                supports.append("水分摂取量・尿色・発汗の様子を確認")
+
             if check_watery_stool and ex_sum["水様便"] > 0:
-                notes.append("水様便")
+                points.append("水様便あり")
+                supports.append("腹部症状・食事量・水分量を確認")
 
             if check_diarrhea and ex_sum["下痢便"] > 0:
-                notes.append("下痢便")
+                points.append("下痢便あり")
+                supports.append("腹部症状・回数・皮膚状態を確認")
 
-            if check_concentrated_urine and ex_sum["濃縮尿"] > 0:
-                notes.append("濃縮尿")
+        # 未排便
+        if _recent_no_stool_days(ex_df, user, target_date, constipation_days):
+            points.append(f"未排便{constipation_days}日")
+            supports.append("腹部の張り・食事量・水分摂取・表情を確認")
 
-            if ex_sum["排便回数"] == 0:
-                notes.append("本日排便記録なし")
-
-        # 未排便設定日数
-        if not ex_df.empty:
-            work = ex_df.copy()
-            work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
-
-            recent_dates = sorted([
-                d for d in work[work["利用者名"] == user]["記録日"].dt.date.dropna().unique()
-                if d <= target_date
-            ])[-constipation_days:]
-
-            if len(recent_dates) >= constipation_days:
-                no_stool_all = True
-
-                for d in recent_dates:
-                    ddf = get_day_excretion_data(work, d, user)
-
-                    if summarize_excretion(ddf)["排便回数"] > 0:
-                        no_stool_all = False
-                        break
-
-                if no_stool_all:
-                    notes.append(f"未排便{constipation_days}日")
-
-        if notes:
+        if points:
+            unique_points = list(dict.fromkeys(points))
+            unique_supports = list(dict.fromkeys(supports))
             rows.append({
                 "利用者名": user,
-                "注意項目": "、".join(sorted(set(notes))),
+                "観察ポイント": "、".join(unique_points),
+                "支援メッセージ": "／".join(unique_supports[:3]) + "。必要時は申し送りで共有してください。",
             })
 
     return pd.DataFrame(rows)
 
+
+def build_attention_users(health_df, ex_df, target_date, settings=None):
+    """管理者向け：今日の注意利用者一覧を作成する。"""
+    settings = normalize_alert_settings(settings or load_alert_settings())
+    staff_df = build_staff_observation_points(health_df, ex_df, target_date, settings)
+
+    if staff_df.empty:
+        return pd.DataFrame(columns=["利用者名", "注意項目"])
+
+    return staff_df[["利用者名", "観察ポイント"]].rename(columns={"観察ポイント": "注意項目"})
 
 
 def show_staff_observation_points():
@@ -944,12 +1080,7 @@ def show_staff_observation_points():
     st.subheader("今日の観察ポイント")
     st.caption("診断ではなく、記録に基づいた見守り・申し送りの補助です。")
 
-    try:
-        points_df = build_staff_observation_points(health_df, ex_df, today)
-    except Exception as e:
-        st.warning("観察ポイントの作成中にエラーがありました。設定値を初期値に戻して再確認してください。")
-        st.caption(str(e))
-        return
+    points_df = build_staff_observation_points(health_df, ex_df, today)
 
     if points_df.empty:
         st.success("今日の記録上、大きな観察ポイントはまだありません。普段の様子を見守ってください。")
