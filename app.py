@@ -1250,12 +1250,7 @@ def show_hidamari_hero(mode="login"):
         <div class="hidamari-hero">
             <div class="hidamari-hero-title">{title}</div>
             <div class="hidamari-hero-sub">{sub}</div>
-            <div class="hidamari-soft-icons">
-                <span>👩‍⚕️</span>
-                <span>🐶</span>
-                <span>📋</span>
-                <span>🌿</span>
-            </div>
+
         </div>
         """,
         unsafe_allow_html=True,
@@ -1404,25 +1399,6 @@ def apply_design():
             color: #64706A;
             font-size: 1.05rem;
             margin-bottom: 14px;
-        }}
-        .hidamari-soft-icons {{
-            display: flex;
-            gap: 12px;
-            margin-top: 18px;
-            align-items: center;
-            flex-wrap: wrap;
-        }}
-        .hidamari-soft-icons span {{
-            width: 46px;
-            height: 46px;
-            border-radius: 18px;
-            background: rgba(255,255,255,0.62);
-            border: 1px solid rgba(0,0,0,0.05);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 25px;
-            box-shadow: 0 4px 12px rgba(55, 64, 58, 0.04);
         }}
         .hidamari-illust-row {{
             display: flex;
