@@ -1229,6 +1229,85 @@ def create_handover_text(health_df, excretion_df, target_date):
     return "\n".join(lines)
 
 
+
+# =========================
+# あたたかい画面デザイン
+# =========================
+def show_hidamari_hero(mode="login"):
+    """介護士・ボーダーコリー風のやさしいイラスト表現をHTML/絵文字で表示する。"""
+    if mode == "login":
+        title = "ひだまり 健康チェック管理システム"
+        sub = "利用者様の健康記録・排泄記録を、やさしく、わかりやすく、安全に。"
+    elif mode == "staff":
+        title = "今日もお疲れ様です"
+        sub = "小さな記録が、利用者様の安心とご家族への信頼につながります。"
+    else:
+        title = "ひだまり 管理者ダッシュボード"
+        sub = "現場の記録を、見える化し、早めの気づきにつなげます。"
+
+    st.markdown(
+        f"""
+        <div class="hidamari-hero">
+            <div class="hidamari-hero-title">{title}</div>
+            <div class="hidamari-hero-sub">{sub}</div>
+            <div>
+                <span class="mini-badge">🧡 楽しく入力</span>
+                <span class="mini-badge">🐾 見守り</span>
+                <span class="mini-badge">🌿 やさしい管理</span>
+            </div>
+            <div class="hidamari-illust-row">
+                <div class="hidamari-illust-card">
+                    <div class="hidamari-emoji">👩‍⚕️</div>
+                    <div>
+                        <div class="hidamari-card-title">やさしい介護士さん</div>
+                        <div class="hidamari-card-text">入力しやすく、記録しやすく。現場の負担を少し軽くします。</div>
+                    </div>
+                </div>
+                <div class="hidamari-illust-card">
+                    <div class="hidamari-emoji">🐶</div>
+                    <div>
+                        <div class="hidamari-card-title">見守りボーダーコリー</div>
+                        <div class="hidamari-card-text">未入力や注意項目をそっと知らせる、頼れる相棒のイメージです。</div>
+                    </div>
+                </div>
+                <div class="hidamari-illust-card">
+                    <div class="hidamari-emoji">📋</div>
+                    <div>
+                        <div class="hidamari-card-title">記録から気づきへ</div>
+                        <div class="hidamari-card-text">健康・食事・排泄の変化を、申し送りや家族レポートへつなげます。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def show_staff_encouragement():
+    st.markdown(
+        """
+        <div class="staff-welcome">
+            <b>👩‍⚕️ お疲れ様です。</b><br>
+            今日の小さな記録が、利用者様の安心につながります。迷ったら、ありのままを短く残せば大丈夫です。 🐶
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def show_admin_encouragement():
+    st.markdown(
+        """
+        <div class="admin-welcome">
+            <b>🌿 管理者モードです。</b><br>
+            入力状況、注意記録、申し送りを確認できます。現場の気づきを、管理の力に変えていきましょう。
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # =========================
 # ログイン・デザイン
 # =========================
@@ -1243,15 +1322,7 @@ def login_check():
     if st.session_state.logged_in:
         return True
 
-    st.markdown(
-        """
-        <div style='text-align:center; padding:24px;'>
-            <h1 style='color:#2E7D32;'>ひだまり 健康チェック管理システム</h1>
-            <p style='color:#666;'>利用者様の健康記録・排泄記録を安全に管理します</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    show_hidamari_hero("login")
 
     col1, col2, col3 = st.columns([1, 2, 1])
 
@@ -1324,23 +1395,175 @@ def apply_design():
         input, textarea {{
             border-radius: 10px !important;
         }}
+        .hidamari-hero {{
+            background: linear-gradient(135deg, #fff7e8 0%, #f0fff4 55%, #eef6ff 100%);
+            border: 1px solid rgba(120, 150, 120, 0.18);
+            border-radius: 28px;
+            padding: 28px 26px;
+            margin: 8px 0 22px 0;
+            box-shadow: 0 8px 24px rgba(90, 80, 60, 0.08);
+            position: relative;
+            overflow: hidden;
+        }}
+        .hidamari-hero:before {{
+            content: "🌿";
+            position: absolute;
+            font-size: 88px;
+            opacity: 0.12;
+            top: -18px;
+            right: 28px;
+            transform: rotate(-12deg);
+        }}
+        .hidamari-hero-title {{
+            font-size: 2.25rem;
+            line-height: 1.25;
+            font-weight: 800;
+            color: #2E7D32;
+            margin-bottom: 8px;
+            letter-spacing: 0.02em;
+        }}
+        .hidamari-hero-sub {{
+            color: #5f665f;
+            font-size: 1.05rem;
+            margin-bottom: 14px;
+        }}
+        .hidamari-illust-row {{
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }}
+        .hidamari-illust-card {{
+            flex: 1 1 210px;
+            background: rgba(255,255,255,0.78);
+            border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 22px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 92px;
+        }}
+        .hidamari-emoji {{
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            background: #fff3d6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 34px;
+            flex: 0 0 auto;
+        }}
+        .hidamari-card-title {{
+            font-weight: 800;
+            color: #3d463d;
+            margin-bottom: 4px;
+        }}
+        .hidamari-card-text {{
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.45;
+        }}
+        .staff-welcome {{
+            background: linear-gradient(135deg, #fff1e8 0%, #fffaf2 100%);
+            border: 1px solid #f1c7ad;
+            border-radius: 18px;
+            padding: 14px 16px;
+            margin: 10px 0 16px 0;
+            color: #70432e;
+        }}
+        .admin-welcome {{
+            background: linear-gradient(135deg, #eaf4ff 0%, #f7fbff 100%);
+            border: 1px solid #bad4ee;
+            border-radius: 18px;
+            padding: 14px 16px;
+            margin: 10px 0 16px 0;
+            color: #23445f;
+        }}
+
+        .page-top-card {{
+            background: linear-gradient(135deg, #fffdf7 0%, #f7fff4 100%);
+            border: 1px solid rgba(120, 150, 120, 0.18);
+            border-radius: 22px;
+            padding: 16px 18px;
+            margin: 10px 0 18px 0;
+            box-shadow: 0 5px 18px rgba(90, 80, 60, 0.06);
+        }}
+        .page-top-title {{
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #2E7D32;
+            margin-bottom: 6px;
+        }}
+        .page-top-text {{
+            color: #5f665f;
+            line-height: 1.55;
+        }}
+        .cute-guide-row {{
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin: 10px 0 18px 0;
+        }}
+        .cute-guide-card {{
+            flex: 1 1 180px;
+            background: #ffffffcc;
+            border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 18px;
+            padding: 12px 14px;
+            min-height: 78px;
+        }}
+        .cute-guide-title {{
+            font-weight: 800;
+            color: #3d463d;
+            margin-bottom: 4px;
+        }}
+        .cute-guide-text {{
+            color: #666;
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }}
+        .soft-divider {{
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(46,125,50,0.18), transparent);
+            margin: 16px 0;
+        }}
+        .sidebar-note {{
+            background: #fff8e8;
+            border: 1px solid #efd6a8;
+            border-radius: 16px;
+            padding: 10px 12px;
+            margin: 8px 0 12px 0;
+            color: #6b4a20;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }}
+
+        .mini-badge {{
+            display: inline-block;
+            background: #ffffffcc;
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 999px;
+            padding: 5px 10px;
+            margin: 3px 4px 3px 0;
+            font-size: 0.86rem;
+        }}
         @media (max-width: 768px) {{
-            section.main > div {{
-                padding-left: 0.75rem;
-                padding-right: 0.75rem;
+            .hidamari-hero {{
+                padding: 20px 16px;
+                border-radius: 20px;
             }}
-            h1 {{
-                font-size: 1.55rem !important;
+            .hidamari-hero-title {{
+                font-size: 1.55rem;
             }}
-            h2 {{
-                font-size: 1.25rem !important;
+            .hidamari-illust-card {{
+                flex: 1 1 100%;
             }}
-            h3 {{
-                font-size: 1.1rem !important;
-            }}
-            div[data-testid="column"] {{
-                width: 100% !important;
-                flex: 1 1 100% !important;
+            .hidamari-emoji {{
+                width: 48px;
+                height: 48px;
+                font-size: 28px;
             }}
         }}
         </style>
@@ -1349,19 +1572,151 @@ def apply_design():
     )
 
 
+def show_page_intro(kind):
+    """各ページの冒頭に、楽しく入力・管理に入れる案内カードを表示する。"""
+    settings = {
+        "dashboard": {
+            "icon": "🐶",
+            "title": "見守りボーダーコリーが、今日の記録を一緒に確認します",
+            "text": "注意が必要な利用者様、排泄の変化、申し送りをやさしく整理します。",
+            "cards": [
+                ("📌 今日の注意", "発熱・SpO2低下・食事量低下などを確認"),
+                ("💬 申し送り", "差分や気になる変化を文章化"),
+                ("🐾 排泄確認", "濃縮尿・下痢便・水様便を見える化"),
+            ],
+        },
+        "health": {
+            "icon": "👩‍⚕️",
+            "title": "やさしい介護士さんと、今日の健康チェック",
+            "text": "バイタル・食事・気になる変化を、落ち着いて記録できます。",
+            "cards": [
+                ("🌡️ バイタル", "体温・血圧・SpO2などを確認"),
+                ("🍚 食事", "朝・昼・夕の摂取率を記録"),
+                ("📝 メモ", "家族共有や気になる変化を残す"),
+            ],
+        },
+        "excretion": {
+            "icon": "🐶",
+            "title": "排泄チェックは、ボーダーコリーと一緒に時系列で",
+            "text": "午前・午後・夕方・夜・深夜・朝方の記録を、ワンタップ感覚で入力できます。",
+            "cards": [
+                ("☀️ 日中帯", "午前・午後・夕方を記録"),
+                ("🌙 夜間帯", "夜・深夜・朝方を記録"),
+                ("✅ 未入力確認", "ページ下部で入力漏れを確認"),
+            ],
+        },
+        "past": {
+            "icon": "📚",
+            "title": "過去データも、見やすく確認・修正",
+            "text": "記録日と利用者名をキーに、健康チェックの確認・更新・削除ができます。",
+            "cards": [
+                ("🔎 検索", "記録日＋利用者名で確認"),
+                ("✏️ 更新", "必要な修正を反映"),
+                ("🧾 一覧", "月ごとの記録を確認"),
+            ],
+        },
+        "ex_admin": {
+            "icon": "🐾",
+            "title": "排泄詳細管理で、変化を早めに見つける",
+            "text": "排泄データを一覧化し、濃縮尿・下痢便・水様便などの確認を支援します。",
+            "cards": [
+                ("📊 サマリー", "利用者別に集計"),
+                ("⚠️ 注意記録", "気になる排泄を抽出"),
+                ("⬇️ CSV", "必要に応じて保存"),
+            ],
+        },
+        "report": {
+            "icon": "💌",
+            "title": "ご家族へ伝わる、やさしいレポート作成",
+            "text": "健康・食事・排泄・アセスメントをもとに、読みやすい文章へ整えます。",
+            "cards": [
+                ("🌿 やわらかい文章", "不安を煽らず記録ベースで共有"),
+                ("📋 記録反映", "健康・排泄・メモを反映"),
+                ("🏠 家族共有", "生活の様子が伝わる表現へ"),
+            ],
+        },
+        "pdf": {
+            "icon": "📄",
+            "title": "ひだまりレポートPDF",
+            "text": "ご家族に渡しやすい形で、月間の様子をまとめます。",
+            "cards": [
+                ("🖨️ 印刷向け", "A4で扱いやすい形式"),
+                ("📈 記録整理", "健康・排泄をまとめて確認"),
+                ("🌼 温かい共有", "やさしい雰囲気で伝える"),
+            ],
+        },
+        "support": {
+            "icon": "🧭",
+            "title": "管理者支援で、記録を気づきに変える",
+            "text": "AI家族レポート、グラフ、申し送り、注意通知をまとめて確認します。",
+            "cards": [
+                ("🤖 AI文章", "家族向け文面を支援"),
+                ("📈 グラフ", "バイタル推移を確認"),
+                ("🔔 注意通知", "確認したい利用者を表示"),
+            ],
+        },
+        "user": {
+            "icon": "👥",
+            "title": "利用者マスタとアセスメントを整える",
+            "text": "利用者情報と生活背景を管理し、記録やレポートの土台にします。",
+            "cards": [
+                ("👤 利用者", "表示・非表示を管理"),
+                ("🧩 アセスメント", "ADL・IADL・課題を整理"),
+                ("🌱 支援内容", "ケアの方向性を記録"),
+            ],
+        },
+    }
+
+    s = settings.get(kind, settings["dashboard"])
+    cards_html = ""
+    for title, text in s["cards"]:
+        cards_html += f"""
+        <div class="cute-guide-card">
+            <div class="cute-guide-title">{title}</div>
+            <div class="cute-guide-text">{text}</div>
+        </div>
+        """
+
+    st.markdown(
+        f"""
+        <div class="page-top-card">
+            <div class="page-top-title">{s['icon']} {s['title']}</div>
+            <div class="page-top-text">{s['text']}</div>
+            <div class="cute-guide-row">
+                {cards_html}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def show_sidebar_mascot():
+    with st.sidebar:
+        st.markdown(
+            """
+            <div class="sidebar-note">
+                🐶 <b>ひだまり見守り隊</b><br>
+                入力も確認も、あわてず一つずつ。<br>
+                小さな記録が大きな安心になります。
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 if not login_check():
     st.stop()
 
 apply_design()
 logout_button()
 
-st.title("健康チェックWebアプリ")
-st.caption("管理者支援・職員入力・家族共有を一体化した健康チェックシステムです。")
-
 if st.session_state.role == "admin":
-    st.success("管理者モード")
+    show_hidamari_hero("admin")
+    show_admin_encouragement()
 else:
-    st.info("お疲れ様です。今日の健康チェック入力・排泄チェック入力をお願いします。")
+    show_hidamari_hero("staff")
+    show_staff_encouragement()
 
 
 # =========================
@@ -1401,10 +1756,12 @@ else:
 # 管理者ダッシュボード
 # =========================
 if menu == "管理者ダッシュボード":
+    show_page_intro("dashboard")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
 
+    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
     st.header("管理者ダッシュボード")
 
     health_df = load_health_data()
@@ -1462,11 +1819,13 @@ if menu == "管理者ダッシュボード":
 # 健康チェック入力
 # =========================
 elif menu == "健康チェック入力":
+    show_page_intro("health")
+    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
     st.header("健康チェック入力")
 
     if st.session_state.role == "staff":
-        st.markdown("### お疲れ様です。")
-        st.write("利用者様の今日の健康状態を入力してください。")
+        st.markdown("### 👩‍⚕️ 健康チェック入力")
+        st.write("バイタルと食事の様子を、今日の記録として残します。")
 
     if not active_users:
         st.warning("利用者マスタに表示中の利用者がいません。")
@@ -1600,12 +1959,14 @@ elif menu == "健康チェック入力":
 # 未入力チェック一覧＋スマホ用ワンタップ風UI
 # =========================
 elif menu == "排泄チェック入力":
+    show_page_intro("excretion")
+    st.markdown('<div class="soft-divider"></div>', unsafe_allow_html=True)
     st.header("排泄チェック入力")
     st.caption("排泄記録は健康チェックとは別データとして保存します。キーは「記録日＋利用者名＋時間帯」です。")
 
     if st.session_state.role == "staff":
-        st.markdown("### お疲れ様です。")
-        st.write("排泄状況を時間帯ごとに入力してください。未入力の確認もこの画面でできます。")
+        st.markdown("### 🐶 排泄チェック入力")
+        st.write("時間帯ごとに、尿・便の様子をワンタップ感覚で記録します。")
 
     if not active_users:
         st.warning("利用者マスタに表示中の利用者がいません。")
@@ -1857,6 +2218,7 @@ elif menu == "排泄チェック入力":
 # 過去データ管理
 # =========================
 elif menu == "過去データ管理":
+    show_page_intro("past")
     st.header("過去データ管理")
     st.caption("健康チェックデータを、記録日＋利用者名で検索・更新・削除します。")
 
@@ -1969,6 +2331,7 @@ elif menu == "過去データ管理":
 # 排泄詳細管理
 # =========================
 elif menu == "排泄詳細管理":
+    show_page_intro("ex_admin")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
@@ -2149,6 +2512,7 @@ elif menu == "排泄詳細管理":
 # 家族向けレポート作成
 # =========================
 elif menu == "家族向けレポート作成":
+    show_page_intro("report")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
@@ -2185,6 +2549,7 @@ elif menu == "家族向けレポート作成":
 # ひだまりレポートPDF
 # =========================
 elif menu == "ひだまりレポートPDF":
+    show_page_intro("pdf")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
@@ -2222,6 +2587,7 @@ elif menu == "ひだまりレポートPDF":
 # 管理者支援
 # =========================
 elif menu == "管理者支援":
+    show_page_intro("support")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
@@ -2330,6 +2696,7 @@ elif menu == "管理者支援":
 # 利用者マスタ管理
 # =========================
 elif menu == "利用者マスタ管理":
+    show_page_intro("user")
     if st.session_state.role != "admin":
         st.error("この画面は管理者専用です。")
         st.stop()
