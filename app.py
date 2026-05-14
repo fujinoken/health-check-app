@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 from datetime import date, datetime
 from io import BytesIO
+import zipfile
 
 try:
     import matplotlib.pyplot as plt
@@ -899,6 +900,82 @@ def build_attention_users(health_df, ex_df, target_date):
 
     return pd.DataFrame(rows)
 
+
+# =========================
+# バックアップ
+# =========================
+def create_backup_zip():
+    """現在のデータファイルをZIP化して返す。"""
+    ensure_dirs()
+
+    # ファイルがなければ作成
+    ensure_health_file()
+    ensure_excretion_file()
+    ensure_user_file()
+
+    buffer = BytesIO()
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        if HEALTH_FILE.exists():
+            zf.write(HEALTH_FILE, arcname="health_data.xlsx")
+        if EXCRETION_FILE.exists():
+            zf.write(EXCRETION_FILE, arcname="excretion_data.xlsx")
+        if USER_FILE.exists():
+            zf.write(USER_FILE, arcname="user_master.xlsx")
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def show_admin_backup_download():
+    """管理者向けバックアップダウンロード欄。"""
+    if st.session_state.role != "admin":
+        return
+
+    st.divider()
+    st.subheader("データバックアップ")
+    st.caption("健康チェック・排泄チェック・利用者マスタをまとめて保存できます。定期的にダウンロードしてください。")
+
+    backup_data = create_backup_zip()
+    backup_name = f"hidamari_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+
+    st.download_button(
+        label="バックアップZIPをダウンロード",
+        data=backup_data,
+        file_name=backup_name,
+        mime="application/zip",
+        use_container_width=True,
+    )
+
+    with st.expander("個別ファイルでダウンロードする"):
+        if HEALTH_FILE.exists():
+            with open(HEALTH_FILE, "rb") as f:
+                st.download_button(
+                    "健康チェックデータをダウンロード",
+                    data=f,
+                    file_name="health_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+        if EXCRETION_FILE.exists():
+            with open(EXCRETION_FILE, "rb") as f:
+                st.download_button(
+                    "排泄チェックデータをダウンロード",
+                    data=f,
+                    file_name="excretion_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+        if USER_FILE.exists():
+            with open(USER_FILE, "rb") as f:
+                st.download_button(
+                    "利用者マスタをダウンロード",
+                    data=f,
+                    file_name="user_master.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+
 # =========================
 # レポート系
 # =========================
@@ -1377,6 +1454,8 @@ if menu == "管理者ダッシュボード":
             )
         else:
             st.success("本日の排泄状況で大きな注意記録はありません。")
+
+    show_admin_backup_download()
 
 
 # =========================
