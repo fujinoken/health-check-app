@@ -845,6 +845,7 @@ def build_attention_users(health_df, ex_df, target_date):
 
     if settings is None:
         settings = load_alert_settings()
+    settings = normalize_alert_settings(settings)
 
     for user in active_users:
         notes = []
@@ -1061,18 +1062,63 @@ DEFAULT_ALERT_SETTINGS = {
     "check_change_note": True,
 }
 
+
+def normalize_alert_settings(settings):
+    """観察ポイント設定の型を安全に整える。"""
+    base = DEFAULT_ALERT_SETTINGS.copy()
+
+    if settings is None:
+        return base
+
+    base.update(settings)
+
+    def to_int(value, default):
+        try:
+            return int(float(value))
+        except Exception:
+            return default
+
+    def to_float(value, default):
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    def to_bool(value, default):
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ["true", "1", "yes", "on", "表示", "有効"]:
+            return True
+        if text in ["false", "0", "no", "off", "非表示", "無効"]:
+            return False
+        return default
+
+    base["meal_threshold"] = to_int(base.get("meal_threshold"), DEFAULT_ALERT_SETTINGS["meal_threshold"])
+    base["meal_drop_threshold"] = to_int(base.get("meal_drop_threshold"), DEFAULT_ALERT_SETTINGS["meal_drop_threshold"])
+    base["temp_threshold"] = to_float(base.get("temp_threshold"), DEFAULT_ALERT_SETTINGS["temp_threshold"])
+    base["spo2_threshold"] = to_int(base.get("spo2_threshold"), DEFAULT_ALERT_SETTINGS["spo2_threshold"])
+    base["constipation_days"] = to_int(base.get("constipation_days"), DEFAULT_ALERT_SETTINGS["constipation_days"])
+    base["check_concentrated_urine"] = to_bool(base.get("check_concentrated_urine"), DEFAULT_ALERT_SETTINGS["check_concentrated_urine"])
+    base["check_diarrhea"] = to_bool(base.get("check_diarrhea"), DEFAULT_ALERT_SETTINGS["check_diarrhea"])
+    base["check_watery_stool"] = to_bool(base.get("check_watery_stool"), DEFAULT_ALERT_SETTINGS["check_watery_stool"])
+    base["check_change_note"] = to_bool(base.get("check_change_note"), DEFAULT_ALERT_SETTINGS["check_change_note"])
+
+    return base
+
+
 def load_alert_settings():
     """観察ポイント設定を読み込む。"""
     if not ALERT_SETTINGS_FILE.exists():
         save_alert_settings(DEFAULT_ALERT_SETTINGS)
-        return DEFAULT_ALERT_SETTINGS.copy()
+        return normalize_alert_settings(DEFAULT_ALERT_SETTINGS.copy())
 
     try:
         df = pd.read_excel(ALERT_SETTINGS_FILE)
 
         if df.empty:
             save_alert_settings(DEFAULT_ALERT_SETTINGS)
-            return DEFAULT_ALERT_SETTINGS.copy()
+            return normalize_alert_settings(DEFAULT_ALERT_SETTINGS.copy())
 
         settings = DEFAULT_ALERT_SETTINGS.copy()
 
@@ -1088,7 +1134,7 @@ def load_alert_settings():
                 elif isinstance(settings[key], float):
                     settings[key] = float(value)
 
-        return settings
+        return normalize_alert_settings(settings)
 
     except Exception:
         return DEFAULT_ALERT_SETTINGS.copy()
