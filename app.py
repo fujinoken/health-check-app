@@ -1539,58 +1539,6 @@ elif menu == "排泄チェック入力":
     with top1:
         record_date = st.date_input("記録日", value=date.today(), key="ex_input_date")
 
-    # 未入力チェック一覧
-    st.subheader("未入力チェック一覧")
-
-    missing_rows = []
-    completed_rows = []
-
-    for user in active_users:
-        for slot, time_label in EXCRETION_SLOTS:
-            row = get_excretion_row(ex_df, record_date, user, slot)
-            if row is None:
-                missing_rows.append(
-                    {
-                        "利用者名": user,
-                        "時間帯": slot,
-                        "時間帯目安": time_label,
-                        "状態": "未入力",
-                    }
-                )
-            else:
-                completed_rows.append(
-                    {
-                        "利用者名": user,
-                        "時間帯": slot,
-                        "時間帯目安": time_label,
-                        "状態": "入力済み",
-                    }
-                )
-
-    total_count = len(active_users) * len(EXCRETION_SLOTS)
-    completed_count = len(completed_rows)
-    missing_count = len(missing_rows)
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("必要記録数", total_count)
-    m2.metric("入力済み", completed_count)
-    m3.metric("未入力", missing_count)
-
-    if missing_rows:
-        st.warning("未入力の排泄記録があります。")
-        with st.expander("未入力一覧を表示する", expanded=True):
-            st.dataframe(pd.DataFrame(missing_rows), use_container_width=True, hide_index=True)
-    else:
-        st.success("この日の排泄記録はすべて入力済みです。")
-
-    with st.expander("入力済み一覧を表示する", expanded=False):
-        if completed_rows:
-            st.dataframe(pd.DataFrame(completed_rows), use_container_width=True, hide_index=True)
-        else:
-            st.info("この日の入力済み記録はまだありません。")
-
-    st.divider()
-
     # 利用者・入力者選択
     col1, col2 = st.columns(2)
     with col1:
@@ -1764,6 +1712,68 @@ elif menu == "排泄チェック入力":
         st.info("この日の排泄記録はまだありません。")
     else:
         st.dataframe(day_data, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # 未入力チェック一覧（ページ下部へ移動）
+    st.subheader("未入力チェック一覧")
+
+    missing_rows = []
+    completed_rows = []
+
+    for user in active_users:
+        for slot, time_label in EXCRETION_SLOTS:
+            row = get_excretion_row(load_excretion_data(), record_date, user, slot)
+
+            if row is None:
+                missing_rows.append(
+                    {
+                        "利用者名": user,
+                        "時間帯": slot,
+                        "時間帯目安": time_label,
+                        "状態": "未入力",
+                    }
+                )
+            else:
+                completed_rows.append(
+                    {
+                        "利用者名": user,
+                        "時間帯": slot,
+                        "時間帯目安": time_label,
+                        "状態": "入力済み",
+                    }
+                )
+
+    total_count = len(active_users) * len(EXCRETION_SLOTS)
+    completed_count = len(completed_rows)
+    missing_count = len(missing_rows)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("必要記録数", total_count)
+    m2.metric("入力済み", completed_count)
+    m3.metric("未入力", missing_count)
+
+    if missing_rows:
+        st.warning("未入力の排泄記録があります。")
+
+        with st.expander("未入力一覧を表示する", expanded=True):
+            st.dataframe(
+                pd.DataFrame(missing_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+    else:
+        st.success("この日の排泄記録はすべて入力済みです。")
+
+    with st.expander("入力済み一覧を表示する", expanded=False):
+        if completed_rows:
+            st.dataframe(
+                pd.DataFrame(completed_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("この日の入力済み記録はまだありません。")
 
 
 # =========================
