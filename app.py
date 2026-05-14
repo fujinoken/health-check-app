@@ -850,9 +850,9 @@ def build_attention_users(health_df, ex_df, target_date):
             idx = find_health_index(health_df, target_date, user)
             if idx is not None:
                 h = health_df.loc[idx]
-                if safe_float(h.get("体温"), 0) >= 37.5:
+                if safe_float(h.get("体温"), 0) >= 37.0:
                     notes.append("発熱傾向")
-                if safe_int(h.get("SpO2"), 100) <= 93 and safe_int(h.get("SpO2"), 100) != 0:
+                if safe_int(h.get("SpO2"), 100) <= 92 and safe_int(h.get("SpO2"), 100) != 0:
                     notes.append("SpO2低下")
                 for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
                     if safe_int(h.get(meal), 100) <= 50:
@@ -899,6 +899,145 @@ def build_attention_users(health_df, ex_df, target_date):
             })
 
     return pd.DataFrame(rows)
+
+
+
+def build_staff_observation_points(health_df, ex_df, target_date):
+    """スタッフ向け：今日の観察ポイントをルールベースで作成する。
+    診断ではなく、見守り・申し送りの補助として使う。
+    """
+    rows = []
+
+    for user in active_users:
+        points = []
+        supports = []
+
+        # 健康チェック
+        current_health = None
+
+        if not health_df.empty:
+            idx = find_health_index(health_df, target_date, user)
+            if idx is not None:
+                current_health = health_df.loc[idx]
+
+                temp = safe_float(current_health.get("体温"), 0)
+                spo2 = safe_int(current_health.get("SpO2"), 0)
+
+                if temp >= 37.0:
+                    points.append(f"体温 {temp}℃")
+                    supports.append("体温・表情・活気の変化を確認")
+
+                if spo2 != 0 and spo2 <= 92:
+                    points.append(f"SpO2 {spo2}%")
+                    supports.append("呼吸状態・顔色・動作時の様子を確認")
+
+                for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+                    value = safe_int(current_health.get(meal), 100)
+
+                    if value <= 50:
+                        meal_name = meal.replace("摂取率", "")
+                        points.append(f"{meal_name} {value}%")
+                        supports.append("食事量・水分量・むせ・眠気を確認")
+
+                if clean_text(current_health.get("気になる変化", "")):
+                    points.append("気になる変化あり")
+                    supports.append("記録内容を申し送りで共有")
+
+                # 前回より食事30％以上低下
+                prev = get_previous_health_record(health_df, target_date, user)
+
+                if prev is not None:
+                    for meal in ["朝食摂取率", "昼食摂取率", "夕食摂取率"]:
+                        now = safe_int(current_health.get(meal), 0)
+                        before = safe_int(prev.get(meal), 0)
+
+                        if before > 0 and now > 0 and before - now >= 30:
+                            meal_name = meal.replace("摂取率", "")
+                            points.append(f"{meal_name}が前回より{before - now}%低下")
+                            supports.append("普段との違いとして食事中の様子を確認")
+
+        # 排泄チェック
+        user_ex = get_day_excretion_data(ex_df, target_date, user)
+
+        if not user_ex.empty:
+            ex_sum = summarize_excretion(user_ex)
+
+            if ex_sum["濃縮尿"] > 0:
+                points.append("濃縮尿あり")
+                supports.append("水分摂取量・尿色・発汗の様子を確認")
+
+            if ex_sum["水様便"] > 0:
+                points.append("水様便あり")
+                supports.append("腹部症状・食事量・水分量を確認")
+
+            if ex_sum["下痢便"] > 0:
+                points.append("下痢便あり")
+                supports.append("腹部症状・回数・皮膚状態を確認")
+
+        # 未排便3日
+        if not ex_df.empty:
+            work = ex_df.copy()
+            work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+
+            recent_dates = sorted([
+                d for d in work[work["利用者名"] == user]["記録日"].dt.date.dropna().unique()
+                if d <= target_date
+            ])[-3:]
+
+            if len(recent_dates) >= 3:
+                no_stool_all = True
+
+                for d in recent_dates:
+                    ddf = get_day_excretion_data(work, d, user)
+                    if summarize_excretion(ddf)["排便回数"] > 0:
+                        no_stool_all = False
+                        break
+
+                if no_stool_all:
+                    points.append("未排便3日")
+                    supports.append("腹部の張り・食事量・水分摂取・表情を確認")
+
+        if points:
+            unique_points = list(dict.fromkeys(points))
+            unique_supports = list(dict.fromkeys(supports))
+
+            rows.append({
+                "利用者名": user,
+                "観察ポイント": "、".join(unique_points),
+                "支援メッセージ": "／".join(unique_supports[:3]) + "。必要時は申し送りで共有してください。",
+            })
+
+    return pd.DataFrame(rows)
+
+
+def show_staff_observation_points():
+    """スタッフ画面上部に今日の観察ポイントを表示する。"""
+    if st.session_state.role != "staff":
+        return
+
+    health_df = load_health_data()
+    ex_df = load_excretion_data()
+    today = date.today()
+
+    st.subheader("今日の観察ポイント")
+    st.caption("診断ではなく、記録に基づいた見守り・申し送りの補助です。")
+
+    points_df = build_staff_observation_points(health_df, ex_df, today)
+
+    if points_df.empty:
+        st.success("今日の記録上、大きな観察ポイントはまだありません。普段の様子を見守ってください。")
+    else:
+        st.warning("今日、少し意識して見守りたい利用者様がいます。")
+        st.dataframe(points_df, use_container_width=True, hide_index=True)
+
+        with st.expander("見守りの使い方"):
+            st.write(
+                "表示された内容は、診断や判断ではありません。"
+                "体調の変化を決めつけず、表情・食事・水分・排泄・動き方を少し意識して見守るための補助として使ってください。"
+            )
+
+    st.divider()
+
 
 
 # =========================
@@ -1497,6 +1636,9 @@ else:
 users_df = load_users(include_hidden=False)
 active_users = users_df["利用者名"].tolist()
 all_users = active_users
+
+# スタッフ向け 今日の観察ポイント
+show_staff_observation_points()
 
 if st.session_state.role == "admin":
     menu = st.sidebar.radio(
