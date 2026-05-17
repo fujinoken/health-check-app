@@ -2351,7 +2351,7 @@ elif menu == "管理者支援":
     health_df = load_health_data()
     ex_df = load_excretion_data()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["AI家族レポート", "バイタル推移グラフ", "ChatGPT連携", "申し送り支援", "注意通知"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["AI家族レポート", "バイタル推移グラフ", "気になる変化", "ChatGPT連携", "申し送り支援", "注意通知"])
 
     with tab1:
         st.subheader("AI家族レポート自動文章")
@@ -2391,7 +2391,80 @@ elif menu == "管理者支援":
                 chart_df = chart_df.set_index("記録日")
                 st.line_chart(chart_df)
 
+
     with tab3:
+        st.subheader("気になる変化（日付別一覧）")
+        st.caption("健康チェック入力の『気になる変化』を、利用者・年月で絞り込み、日付ごとに確認できます。")
+
+        if health_df.empty:
+            st.info("健康チェックデータがありません。")
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                change_user = st.selectbox("利用者", all_users, key="change_user")
+            with col2:
+                change_year = st.number_input("年", min_value=2024, max_value=2035, value=date.today().year, step=1, key="change_year")
+            with col3:
+                change_month = st.number_input("月", min_value=1, max_value=12, value=date.today().month, step=1, key="change_month")
+
+            change_target = get_month_health_data(health_df, change_user, change_year, change_month)
+
+            if change_target.empty:
+                st.warning("対象月の健康チェックデータがありません。")
+            else:
+                change_rows = change_target.copy()
+                change_rows["気になる変化"] = change_rows["気になる変化"].fillna("").astype(str).str.strip()
+                change_rows = change_rows[change_rows["気になる変化"] != ""]
+
+                if change_rows.empty:
+                    st.success("対象月に『気になる変化』の記録はありません。")
+                else:
+                    change_rows = change_rows.sort_values("記録日")
+                    display_df = change_rows[["記録日", "利用者名", "気になる変化", "家族共有メモ", "入力者", "登録日時"]].copy()
+                    display_df["日付"] = pd.to_datetime(display_df["記録日"], errors="coerce").dt.strftime("%Y/%m/%d")
+                    display_df = display_df[["日付", "利用者名", "気になる変化", "家族共有メモ", "入力者", "登録日時"]]
+
+                    st.warning(f"{change_user} の {int(change_year)}年{int(change_month)}月に、気になる変化が {len(display_df)} 件あります。")
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    st.markdown("#### 日付ごとの確認メモ")
+                    memo_lines = []
+                    for _, row in display_df.iterrows():
+                        date_label = clean_text(row.get("日付", ""))
+                        change_text = clean_text(row.get("気になる変化", ""))
+                        family_text = clean_text(row.get("家族共有メモ", ""))
+                        staff_text = clean_text(row.get("入力者", ""))
+
+                        st.markdown(
+                            f"""
+                            <div style='background:#FFF8E8; border:1px solid #E5C782; border-radius:14px; padding:12px 14px; margin:8px 0;'>
+                                <b>{date_label}</b><br>
+                                <span style='color:#7A4A00;'>気になる変化：</span>{change_text}<br>
+                                <span style='color:#666;'>家族共有メモ：</span>{family_text if family_text else '記録なし'}<br>
+                                <span style='color:#888; font-size:0.9rem;'>入力者：{staff_text if staff_text else '未入力'}</span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        memo_lines.append(
+                            f"{date_label}\n"
+                            f"気になる変化：{change_text}\n"
+                            f"家族共有メモ：{family_text if family_text else '記録なし'}\n"
+                            f"入力者：{staff_text if staff_text else '未入力'}"
+                        )
+
+                    export_text = f"{change_user}　{int(change_year)}年{int(change_month)}月　気になる変化一覧\n\n" + "\n\n".join(memo_lines)
+                    st.text_area("コピー用テキスト", value=export_text, height=260)
+                    st.download_button(
+                        "気になる変化一覧をテキストでダウンロード",
+                        data=export_text.encode("utf-8-sig"),
+                        file_name=f"気になる変化一覧_{change_user}_{int(change_year)}年{int(change_month)}月.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+
+    with tab4:
         st.subheader("ChatGPT連携用プロンプト")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -2427,13 +2500,13 @@ elif menu == "管理者支援":
 """
         st.text_area("プロンプト", value=prompt, height=520)
 
-    with tab4:
+    with tab5:
         st.subheader("申し送り支援")
         target_date = st.date_input("対象日", value=date.today(), key="handover_date")
         handover = create_handover_text(health_df, ex_df, target_date)
         st.text_area("申し送り案", value=handover, height=360)
 
-    with tab5:
+    with tab6:
         st.subheader("注意通知")
         alert_date = st.date_input("注意通知の対象日", value=date.today(), key="alert_date")
         alert_df = build_attention_users(health_df, ex_df, alert_date)
