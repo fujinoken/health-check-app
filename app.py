@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import hashlib
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 import zipfile
 
@@ -1532,42 +1532,61 @@ if menu == "管理者ダッシュボード":
     health_df = load_health_data()
     ex_df = load_excretion_data()
     today = date.today()
+    yesterday = today - timedelta(days=1)
 
-    today_excretion = get_day_excretion_data(ex_df, today, None)
+    st.markdown(
+        """
+        <div class="info-box">
+            <b>出勤時の確認用ダッシュボードです。</b><br>
+            初期表示は「昨日」です。前日の様子・注意記録・排泄状況を確認してから、本日の対応につなげます。
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    h_today = health_df.copy()
-    if not h_today.empty:
-        h_today["記録日"] = pd.to_datetime(h_today["記録日"], errors="coerce")
-        h_today = h_today[h_today["記録日"].dt.date == today]
+    target_date = st.date_input(
+        "確認する日付",
+        value=yesterday,
+        key="admin_dashboard_target_date",
+        help="朝の確認では昨日の日付を基本にします。必要に応じて別日も確認できます。",
+    )
+
+    target_excretion = get_day_excretion_data(ex_df, target_date, None)
+
+    h_target = health_df.copy()
+    if not h_target.empty:
+        h_target["記録日"] = pd.to_datetime(h_target["記録日"], errors="coerce")
+        h_target = h_target[h_target["記録日"].dt.date == target_date]
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("本日の健康記録", len(h_today))
-    col2.metric("本日の排泄記録", len(today_excretion))
+    col1.metric("確認日の健康記録", len(h_target))
+    col2.metric("確認日の排泄記録", len(target_excretion))
     col3.metric("利用者数", len(active_users))
 
-    ex_sum = summarize_excretion(today_excretion)
-    col4.metric("本日の排便記録", ex_sum["排便回数"])
+    ex_sum = summarize_excretion(target_excretion)
+    col4.metric("確認日の排便記録", ex_sum["排便回数"])
 
-    st.subheader("今日の注意利用者")
-    attention_df = build_attention_users(health_df, ex_df, today)
+    st.subheader("確認日の注意利用者")
+    attention_df = build_attention_users(health_df, ex_df, target_date)
     if attention_df.empty:
-        st.success("今日の注意利用者はありません。")
+        st.success("確認日の注意利用者はありません。")
     else:
         st.warning("確認したい利用者がいます。")
         st.dataframe(attention_df, use_container_width=True, hide_index=True)
 
-    st.subheader("本日の申し送り支援")
+    st.subheader("前日の申し送り確認")
+    st.caption("初期表示は昨日です。出勤時に、前日の気になる変化・家族共有メモ・注意項目を確認できます。")
     st.text_area(
         "申し送りメモ",
-        value=create_handover_text(health_df, ex_df, today),
+        value=create_handover_text(health_df, ex_df, target_date),
         height=320,
     )
 
-    st.subheader("本日の排泄状況")
-    if today_excretion.empty:
-        st.info("本日の排泄記録はまだありません。")
+    st.subheader("確認日の排泄状況")
+    if target_excretion.empty:
+        st.info("確認日の排泄記録はまだありません。")
     else:
-        st.dataframe(today_excretion, use_container_width=True, hide_index=True)
+        st.dataframe(target_excretion, use_container_width=True, hide_index=True)
 
         if ex_sum["濃縮尿"] or ex_sum["下痢便"] or ex_sum["水様便"]:
             st.warning(
@@ -1575,7 +1594,7 @@ if menu == "管理者ダッシュボード":
                 f"下痢便 {ex_sum['下痢便']}件、水様便 {ex_sum['水様便']}件"
             )
         else:
-            st.success("本日の排泄状況で大きな注意記録はありません。")
+            st.success("確認日の排泄状況で大きな注意記録はありません。")
 
     show_admin_backup_download()
 
