@@ -1538,14 +1538,14 @@ if menu == "管理者ダッシュボード":
         """
         <div class="info-box">
             <b>出勤時の確認用ダッシュボードです。</b><br>
-            初期表示は「昨日」です。前日の様子・注意記録・排泄状況を確認してから、本日の対応につなげます。
+            初期表示は「昨日」です。前日の申し送り・注意記録・排泄状況を確認してから、本日の対応につなげます。
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     target_date = st.date_input(
-        "確認する日付",
+        "確認する日付（初期表示：昨日）",
         value=yesterday,
         key="admin_dashboard_target_date",
         help="朝の確認では昨日の日付を基本にします。必要に応じて別日も確認できます。",
@@ -1582,9 +1582,10 @@ if menu == "管理者ダッシュボード":
         height=320,
     )
 
-    st.subheader("確認日の排泄状況")
+    st.subheader("前日の排泄状況確認")
+    st.caption("初期表示は昨日です。出勤時に、前日の排尿・排便・濃縮尿・下痢便・水様便の有無を確認できます。")
     if target_excretion.empty:
-        st.info("確認日の排泄記録はまだありません。")
+        st.info("前日（確認日）の排泄記録はまだありません。")
     else:
         st.dataframe(target_excretion, use_container_width=True, hide_index=True)
 
@@ -1594,7 +1595,7 @@ if menu == "管理者ダッシュボード":
                 f"下痢便 {ex_sum['下痢便']}件、水様便 {ex_sum['水様便']}件"
             )
         else:
-            st.success("確認日の排泄状況で大きな注意記録はありません。")
+            st.success("前日（確認日）の排泄状況で大きな注意記録はありません。")
 
     show_admin_backup_download()
 
