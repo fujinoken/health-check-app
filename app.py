@@ -871,7 +871,7 @@ def build_attention_users(health_df, ex_df, target_date):
             if ex_sum["濃縮尿"] > 0:
                 notes.append("濃縮尿")
             if ex_sum["排便回数"] == 0:
-                notes.append("本日排便記録なし")
+                notes.append("確認日排便記録なし")
 
         # 未排便3日
         if not ex_df.empty:
@@ -899,6 +899,53 @@ def build_attention_users(health_df, ex_df, target_date):
             })
 
     return pd.DataFrame(rows)
+
+
+
+def build_no_stool_3days_users(ex_df, target_date):
+    """確認日までの直近3日間で排便記録がない利用者を一覧化する。"""
+    rows = []
+
+    target = pd.to_datetime(target_date, errors="coerce")
+    if pd.isna(target):
+        return pd.DataFrame(columns=["利用者名", "対象期間", "最終排便記録", "確認メモ"])
+
+    target_day = target.date()
+    check_dates = [target_day - timedelta(days=i) for i in [2, 1, 0]]
+    period_text = f"{check_dates[0].strftime('%m/%d')}〜{check_dates[-1].strftime('%m/%d')}"
+
+    work = ex_df.copy()
+    if not work.empty:
+        work["記録日"] = pd.to_datetime(work["記録日"], errors="coerce")
+
+    for user in active_users:
+        stool_counts = []
+        for d in check_dates:
+            day_df = get_day_excretion_data(work, d, user)
+            stool_counts.append(summarize_excretion(day_df)["排便回数"])
+
+        if sum(stool_counts) == 0:
+            last_stool_text = "確認できません"
+            if not work.empty:
+                user_df = work[
+                    (work["利用者名"] == user)
+                    & (work["記録日"].dt.date < check_dates[0])
+                ].copy()
+                if not user_df.empty:
+                    stool_df = user_df[user_df["便量"].fillna("なし") != "なし"].copy()
+                    if not stool_df.empty:
+                        last_date = stool_df["記録日"].max()
+                        if pd.notna(last_date):
+                            last_stool_text = last_date.strftime("%Y/%m/%d")
+
+            rows.append({
+                "利用者名": user,
+                "対象期間": period_text,
+                "最終排便記録": last_stool_text,
+                "確認メモ": "直近3日間、排便記録がありません。水分・食事量・腹部症状・普段の排便間隔を確認してください。",
+            })
+
+    return pd.DataFrame(rows, columns=["利用者名", "対象期間", "最終排便記録", "確認メモ"])
 
 
 # =========================
@@ -1573,6 +1620,15 @@ if menu == "管理者ダッシュボード":
     else:
         st.warning("確認したい利用者がいます。")
         st.dataframe(attention_df, use_container_width=True, hide_index=True)
+
+    st.subheader("直近3日間、排便記録がない利用者")
+    st.caption("確認する日付を含めた直近3日間で、排便記録がない利用者を表示します。")
+    no_stool_3days_df = build_no_stool_3days_users(ex_df, target_date)
+    if no_stool_3days_df.empty:
+        st.success("確認日までの直近3日間で、排便記録がない利用者はありません。")
+    else:
+        st.warning("排便状況を確認したい利用者がいます。")
+        st.dataframe(no_stool_3days_df, use_container_width=True, hide_index=True)
 
     st.subheader("前日の申し送り確認")
     st.caption("初期表示は昨日です。出勤時に、前日の気になる変化・家族共有メモ・注意項目を確認できます。")
