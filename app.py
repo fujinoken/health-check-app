@@ -52,6 +52,7 @@ REPORT_DIR = Path("reports")
 HEALTH_FILE = DATA_DIR / "health_data.xlsx"
 EXCRETION_FILE = DATA_DIR / "excretion_data.xlsx"
 USER_FILE = DATA_DIR / "user_master.xlsx"
+HANDOVER_FILE = DATA_DIR / "business_handover_data.xlsx"
 
 HEALTH_SHEET = "健康チェック"
 EXCRETION_SHEET = "排泄チェック"
@@ -128,6 +129,18 @@ EXCRETION_COLUMNS = [
 ]
 
 USER_COLUMNS = ["利用者名", "表示"] + ASSESSMENT_COLUMNS
+
+BUSINESS_HANDOVER_COLUMNS = [
+    "記録ID",
+    "日付",
+    "勤務帯",
+    "記入者",
+    "全体申し送り",
+    "要確認事項",
+    "優先度",
+    "対応状況",
+    "記録日時",
+]
 
 
 # =========================
@@ -948,6 +961,255 @@ def build_no_stool_3days_users(ex_df, target_date):
     return pd.DataFrame(rows, columns=["利用者名", "対象期間", "最終排便記録", "確認メモ"])
 
 
+
+# =========================
+# 業務全体申し送りデータ
+# =========================
+def ensure_business_handover_file():
+    ensure_excel_file(HANDOVER_FILE, "業務全体申し送り", BUSINESS_HANDOVER_COLUMNS)
+
+
+def load_business_handover_data():
+    ensure_business_handover_file()
+
+    try:
+        df = pd.read_excel(HANDOVER_FILE, sheet_name="業務全体申し送り")
+    except Exception:
+        df = pd.DataFrame(columns=BUSINESS_HANDOVER_COLUMNS)
+
+    for col in BUSINESS_HANDOVER_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[BUSINESS_HANDOVER_COLUMNS].copy()
+
+    if not df.empty:
+        df["日付"] = pd.to_datetime(df["日付"], errors="coerce")
+        for col in ["記録ID", "勤務帯", "記入者", "全体申し送り", "要確認事項", "優先度", "対応状況", "記録日時"]:
+            df[col] = df[col].fillna("").astype(str)
+
+    return df.astype("object")
+
+
+def save_business_handover_data(df):
+    ensure_dirs()
+    df = df.copy()
+
+    for col in BUSINESS_HANDOVER_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    df = df[BUSINESS_HANDOVER_COLUMNS].astype("object")
+
+    if not df.empty:
+        df["日付"] = pd.to_datetime(df["日付"], errors="coerce")
+        df["_sort_dt"] = pd.to_datetime(df["記録日時"], errors="coerce")
+        df = df.sort_values(["日付", "_sort_dt"], ascending=[False, False]).drop(columns=["_sort_dt"])
+
+    df.to_excel(HANDOVER_FILE, index=False, sheet_name="業務全体申し送り")
+
+
+def make_business_handover_id(record_date, shift_type, staff_name):
+    d = pd.to_datetime(record_date, errors="coerce")
+    date_text = d.strftime("%Y%m%d") if not pd.isna(d) else datetime.now().strftime("%Y%m%d")
+    staff_text = clean_text(staff_name, "未入力").replace(" ", "").replace("　", "")
+    shift_text = clean_text(shift_type, "勤務")
+    now_text = datetime.now().strftime("%H%M%S")
+    return f"BH-{date_text}-{shift_text}-{staff_text}-{now_text}"
+
+
+def get_business_handover_by_date(df, target_date):
+    if df.empty:
+        return pd.DataFrame(columns=BUSINESS_HANDOVER_COLUMNS)
+
+    work = df.copy()
+    work["日付"] = pd.to_datetime(work["日付"], errors="coerce")
+    target = pd.to_datetime(target_date, errors="coerce")
+
+    if pd.isna(target):
+        return pd.DataFrame(columns=BUSINESS_HANDOVER_COLUMNS)
+
+    work = work[work["日付"].dt.date == target.date()].copy()
+    if not work.empty:
+        work["_sort_dt"] = pd.to_datetime(work["記録日時"], errors="coerce")
+        work = work.sort_values("_sort_dt", ascending=False).drop(columns=["_sort_dt"])
+
+    return work
+
+
+def get_business_handover_alerts(df):
+    if df.empty:
+        return pd.DataFrame(columns=BUSINESS_HANDOVER_COLUMNS)
+
+    work = df.copy()
+    work["日付"] = pd.to_datetime(work["日付"], errors="coerce")
+    alert_df = work[
+        (work["対応状況"].isin(["未対応", "対応中"]))
+        | (work["優先度"] == "至急")
+    ].copy()
+
+    if not alert_df.empty:
+        alert_df["_sort_dt"] = pd.to_datetime(alert_df["記録日時"], errors="coerce")
+        alert_df = alert_df.sort_values(["日付", "_sort_dt"], ascending=[False, False]).drop(columns=["_sort_dt"])
+
+    return alert_df
+
+
+def render_business_handover_card(row):
+    priority = clean_text(row.get("優先度", "通常"), "通常")
+    icon = "🔴" if priority == "至急" else "🟡" if priority == "注意" else "🟢"
+
+    record_date = row.get("日付", "")
+    if not isinstance(record_date, str):
+        try:
+            record_date = pd.to_datetime(record_date).strftime("%Y-%m-%d")
+        except Exception:
+            record_date = ""
+
+    st.markdown(
+        f"""
+        <div style="
+            border:1px solid #e0d6c8;
+            border-radius:14px;
+            padding:14px 16px;
+            margin-bottom:12px;
+            background-color:#fffdf7;
+        ">
+        <b>{icon} {record_date}｜{clean_text(row.get('勤務帯'))}｜{clean_text(row.get('記入者'))}｜{priority}｜{clean_text(row.get('対応状況'))}</b><br><br>
+        <b>全体申し送り</b><br>
+        {clean_text(row.get('全体申し送り'), '記載なし').replace(chr(10), '<br>')}<br><br>
+        <b>要確認事項</b><br>
+        {clean_text(row.get('要確認事項'), '記載なし').replace(chr(10), '<br>')}<br><br>
+        <span style="font-size:12px;color:#666;">記録日時：{clean_text(row.get('記録日時'))}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def show_business_handover_menu():
+    st.header("業務全体申し送り")
+    st.caption("利用者個別ではなく、施設全体の出来事・注意点・次の勤務者に共有したい内容を記録します。")
+
+    df = load_business_handover_data()
+
+    with st.form("business_handover_form", clear_on_submit=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            record_date = st.date_input("日付", value=date.today(), key="business_handover_date")
+        with c2:
+            shift_type = st.selectbox("勤務帯", ["日勤", "夜勤"], index=0, key="business_handover_shift")
+        with c3:
+            staff_name = st.text_input("記入者", placeholder="例：藤野", key="business_handover_staff")
+
+        overall_note = st.text_area(
+            "全体申し送り",
+            height=150,
+            placeholder="例：共有スペースの床が滑りやすいため注意。来客予定あり。備品の補充が必要です。",
+        )
+
+        check_note = st.text_area(
+            "要確認事項",
+            height=120,
+            placeholder="例：明日の往診時間確認、家族連絡の確認、物品残数確認など",
+        )
+
+        c4, c5 = st.columns(2)
+        with c4:
+            priority = st.selectbox("優先度", ["通常", "注意", "至急"], index=0)
+        with c5:
+            status = st.selectbox("対応状況", ["未対応", "対応中", "対応済"], index=0)
+
+        submitted = st.form_submit_button("業務全体申し送りを保存", use_container_width=True)
+
+    if submitted:
+        if not clean_text(staff_name):
+            st.warning("記入者を入力してください。")
+            st.stop()
+
+        if not clean_text(overall_note) and not clean_text(check_note):
+            st.warning("全体申し送り、または要確認事項を入力してください。")
+            st.stop()
+
+        new_record = {
+            "記録ID": make_business_handover_id(record_date, shift_type, staff_name),
+            "日付": record_date,
+            "勤務帯": shift_type,
+            "記入者": clean_text(staff_name),
+            "全体申し送り": clean_text(overall_note),
+            "要確認事項": clean_text(check_note),
+            "優先度": priority,
+            "対応状況": status,
+            "記録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        df = pd.concat([df, pd.DataFrame([new_record], columns=BUSINESS_HANDOVER_COLUMNS)], ignore_index=True)
+        save_business_handover_data(df)
+        st.success("業務全体申し送りを保存しました。")
+        st.rerun()
+
+    st.divider()
+    st.subheader("業務全体申し送り一覧")
+
+    df = load_business_handover_data()
+    if df.empty:
+        st.info("まだ業務全体申し送りは登録されていません。")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        filter_date = st.date_input("表示する日付", value=date.today(), key="business_handover_filter_date")
+    with c2:
+        filter_status = st.selectbox("対応状況", ["すべて", "未対応", "対応中", "対応済"], key="business_handover_filter_status")
+    with c3:
+        filter_priority = st.selectbox("優先度", ["すべて", "通常", "注意", "至急"], key="business_handover_filter_priority")
+
+    view_df = get_business_handover_by_date(df, filter_date)
+
+    if filter_status != "すべて":
+        view_df = view_df[view_df["対応状況"] == filter_status]
+    if filter_priority != "すべて":
+        view_df = view_df[view_df["優先度"] == filter_priority]
+
+    if view_df.empty:
+        st.info("条件に合う申し送りはありません。")
+        return
+
+    for _, row in view_df.iterrows():
+        render_business_handover_card(row)
+
+
+def show_admin_business_handover_summary(target_date):
+    st.subheader("業務全体申し送り")
+    st.caption("確認日の申し送りと、未対応・至急の申し送りを表示します。")
+
+    df = load_business_handover_data()
+
+    if df.empty:
+        st.info("業務全体申し送りはまだ登録されていません。")
+        return
+
+    target_df = get_business_handover_by_date(df, target_date)
+    alert_df = get_business_handover_alerts(df)
+
+    tab1, tab2 = st.tabs(["確認日の申し送り", "未対応・至急"])
+
+    with tab1:
+        if target_df.empty:
+            st.info("確認日の業務全体申し送りはありません。")
+        else:
+            for _, row in target_df.iterrows():
+                render_business_handover_card(row)
+
+    with tab2:
+        if alert_df.empty:
+            st.success("未対応・至急の業務全体申し送りはありません。")
+        else:
+            for _, row in alert_df.iterrows():
+                render_business_handover_card(row)
+
+
+
 # =========================
 # バックアップ
 # =========================
@@ -959,6 +1221,7 @@ def create_backup_zip():
     ensure_health_file()
     ensure_excretion_file()
     ensure_user_file()
+    ensure_business_handover_file()
 
     buffer = BytesIO()
 
@@ -969,6 +1232,8 @@ def create_backup_zip():
             zf.write(EXCRETION_FILE, arcname="excretion_data.xlsx")
         if USER_FILE.exists():
             zf.write(USER_FILE, arcname="user_master.xlsx")
+        if HANDOVER_FILE.exists():
+            zf.write(HANDOVER_FILE, arcname="business_handover_data.xlsx")
 
     buffer.seek(0)
     return buffer.getvalue()
@@ -1019,6 +1284,15 @@ def show_admin_backup_download():
                     "利用者マスタをダウンロード",
                     data=f,
                     file_name="user_master.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+        if HANDOVER_FILE.exists():
+            with open(HANDOVER_FILE, "rb") as f:
+                st.download_button(
+                    "業務全体申し送りデータをダウンロード",
+                    data=f,
+                    file_name="business_handover_data.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
@@ -1547,6 +1821,7 @@ if st.session_state.role == "admin":
             "管理者ダッシュボード",
             "健康チェック入力",
             "排泄チェック入力",
+            "業務全体申し送り",
             "過去データ管理",
             "排泄詳細管理",
             "家族向けレポート作成",
@@ -1561,6 +1836,7 @@ else:
         [
             "健康チェック入力",
             "排泄チェック入力",
+            "業務全体申し送り",
             "過去データ管理",
         ],
     )
@@ -1653,7 +1929,16 @@ if menu == "管理者ダッシュボード":
         else:
             st.success("前日（確認日）の排泄状況で大きな注意記録はありません。")
 
+    show_admin_business_handover_summary(target_date)
+
     show_admin_backup_download()
+
+
+# =========================
+# 業務全体申し送り
+# =========================
+elif menu == "業務全体申し送り":
+    show_business_handover_menu()
 
 
 # =========================
