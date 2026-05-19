@@ -1180,8 +1180,8 @@ def show_business_handover_menu():
 
 
 def show_admin_business_handover_summary(target_date):
-    st.subheader("業務全体申し送り")
-    st.caption("確認日の申し送りと、未対応・至急の申し送りを表示します。")
+    st.subheader("🏠 業務全体申し送り")
+    st.caption("出勤時に最初に確認する項目です。確認日の申し送りと、未対応・至急の申し送りを表示します。")
 
     df = load_business_handover_data()
 
@@ -1889,6 +1889,11 @@ if menu == "管理者ダッシュボード":
     ex_sum = summarize_excretion(target_excretion)
     col4.metric("確認日の排便記録", ex_sum["排便回数"])
 
+    # 出勤時に最初に確認したい項目として、業務全体申し送りを上部に表示
+    st.markdown("---")
+    show_admin_business_handover_summary(target_date)
+    st.markdown("---")
+
     st.subheader("確認日の注意利用者")
     attention_df = build_attention_users(health_df, ex_df, target_date)
     if attention_df.empty:
@@ -1928,8 +1933,6 @@ if menu == "管理者ダッシュボード":
             )
         else:
             st.success("前日（確認日）の排泄状況で大きな注意記録はありません。")
-
-    show_admin_business_handover_summary(target_date)
 
     show_admin_backup_download()
 
