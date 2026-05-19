@@ -1091,93 +1091,283 @@ def show_business_handover_menu():
     st.header("業務全体申し送り")
     st.caption("利用者個別ではなく、施設全体の出来事・注意点・次の勤務者に共有したい内容を記録します。")
 
-    df = load_business_handover_data()
+    tab_input, tab_manage = st.tabs(["新規登録", "検索・更新・削除"])
 
-    with st.form("business_handover_form", clear_on_submit=False):
+    with tab_input:
+        df = load_business_handover_data()
+
+        with st.form("business_handover_form", clear_on_submit=False):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                record_date = st.date_input("日付", value=date.today(), key="business_handover_date")
+            with c2:
+                shift_type = st.selectbox("勤務帯", ["日勤", "夜勤"], index=0, key="business_handover_shift")
+            with c3:
+                staff_name = st.text_input("記入者", placeholder="例：藤野", key="business_handover_staff")
+
+            overall_note = st.text_area(
+                "全体申し送り",
+                height=150,
+                placeholder="例：共有スペースの床が滑りやすいため注意。来客予定あり。備品の補充が必要です。",
+                key="business_handover_overall_note",
+            )
+
+            check_note = st.text_area(
+                "要確認事項",
+                height=120,
+                placeholder="例：明日の往診時間確認、家族連絡の確認、物品残数確認など",
+                key="business_handover_check_note",
+            )
+
+            c4, c5 = st.columns(2)
+            with c4:
+                priority = st.selectbox("優先度", ["通常", "注意", "至急"], index=0, key="business_handover_priority")
+            with c5:
+                status = st.selectbox("対応状況", ["未対応", "対応中", "対応済"], index=0, key="business_handover_status")
+
+            submitted = st.form_submit_button("業務全体申し送りを保存", use_container_width=True)
+
+        if submitted:
+            if not clean_text(staff_name):
+                st.warning("記入者を入力してください。")
+                st.stop()
+
+            if not clean_text(overall_note) and not clean_text(check_note):
+                st.warning("全体申し送り、または要確認事項を入力してください。")
+                st.stop()
+
+            new_record = {
+                "記録ID": make_business_handover_id(record_date, shift_type, staff_name),
+                "日付": record_date,
+                "勤務帯": shift_type,
+                "記入者": clean_text(staff_name),
+                "全体申し送り": clean_text(overall_note),
+                "要確認事項": clean_text(check_note),
+                "優先度": priority,
+                "対応状況": status,
+                "記録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+            df = pd.concat([df, pd.DataFrame([new_record], columns=BUSINESS_HANDOVER_COLUMNS)], ignore_index=True)
+            save_business_handover_data(df)
+            st.success("業務全体申し送りを保存しました。")
+            st.rerun()
+
+        st.divider()
+        st.subheader("本日の業務全体申し送り")
+        today_df = get_business_handover_by_date(load_business_handover_data(), date.today())
+        if today_df.empty:
+            st.info("本日の業務全体申し送りはまだありません。")
+        else:
+            for _, row in today_df.iterrows():
+                render_business_handover_card(row)
+
+    with tab_manage:
+        st.subheader("業務全体申し送りの検索")
+        df = load_business_handover_data()
+
+        if df.empty:
+            st.info("まだ業務全体申し送りは登録されていません。")
+            return
+
+        work = df.copy()
+        work["日付"] = pd.to_datetime(work["日付"], errors="coerce")
+
+        valid_dates = work["日付"].dropna()
+        if valid_dates.empty:
+            default_start = date.today() - timedelta(days=7)
+            default_end = date.today()
+        else:
+            default_start = valid_dates.min().date()
+            default_end = valid_dates.max().date()
+
         c1, c2, c3 = st.columns(3)
         with c1:
-            record_date = st.date_input("日付", value=date.today(), key="business_handover_date")
+            start_date = st.date_input("開始日", value=default_start, key="bh_search_start_date")
         with c2:
-            shift_type = st.selectbox("勤務帯", ["日勤", "夜勤"], index=0, key="business_handover_shift")
+            end_date = st.date_input("終了日", value=default_end, key="bh_search_end_date")
         with c3:
-            staff_name = st.text_input("記入者", placeholder="例：藤野", key="business_handover_staff")
+            keyword = st.text_input("キーワード検索", placeholder="記入者・本文・要確認事項", key="bh_search_keyword")
 
-        overall_note = st.text_area(
-            "全体申し送り",
-            height=150,
-            placeholder="例：共有スペースの床が滑りやすいため注意。来客予定あり。備品の補充が必要です。",
-        )
-
-        check_note = st.text_area(
-            "要確認事項",
-            height=120,
-            placeholder="例：明日の往診時間確認、家族連絡の確認、物品残数確認など",
-        )
-
-        c4, c5 = st.columns(2)
+        c4, c5, c6 = st.columns(3)
         with c4:
-            priority = st.selectbox("優先度", ["通常", "注意", "至急"], index=0)
+            shift_filter = st.selectbox("勤務帯", ["すべて", "日勤", "夜勤"], key="bh_search_shift")
         with c5:
-            status = st.selectbox("対応状況", ["未対応", "対応中", "対応済"], index=0)
+            status_filter = st.selectbox("対応状況", ["すべて", "未対応", "対応中", "対応済"], key="bh_search_status")
+        with c6:
+            priority_filter = st.selectbox("優先度", ["すべて", "通常", "注意", "至急"], key="bh_search_priority")
 
-        submitted = st.form_submit_button("業務全体申し送りを保存", use_container_width=True)
+        filtered = work[
+            (work["日付"].dt.date >= start_date)
+            & (work["日付"].dt.date <= end_date)
+        ].copy()
 
-    if submitted:
-        if not clean_text(staff_name):
-            st.warning("記入者を入力してください。")
-            st.stop()
+        if shift_filter != "すべて":
+            filtered = filtered[filtered["勤務帯"] == shift_filter]
+        if status_filter != "すべて":
+            filtered = filtered[filtered["対応状況"] == status_filter]
+        if priority_filter != "すべて":
+            filtered = filtered[filtered["優先度"] == priority_filter]
 
-        if not clean_text(overall_note) and not clean_text(check_note):
-            st.warning("全体申し送り、または要確認事項を入力してください。")
-            st.stop()
+        keyword = clean_text(keyword)
+        if keyword:
+            search_text = (
+                filtered["記入者"].fillna("").astype(str)
+                + " " + filtered["全体申し送り"].fillna("").astype(str)
+                + " " + filtered["要確認事項"].fillna("").astype(str)
+            )
+            filtered = filtered[search_text.str.contains(keyword, case=False, na=False)]
 
-        new_record = {
-            "記録ID": make_business_handover_id(record_date, shift_type, staff_name),
-            "日付": record_date,
-            "勤務帯": shift_type,
-            "記入者": clean_text(staff_name),
-            "全体申し送り": clean_text(overall_note),
-            "要確認事項": clean_text(check_note),
-            "優先度": priority,
-            "対応状況": status,
-            "記録日時": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        if not filtered.empty:
+            filtered["_sort_dt"] = pd.to_datetime(filtered["記録日時"], errors="coerce")
+            filtered = filtered.sort_values(["日付", "_sort_dt"], ascending=[False, False]).drop(columns=["_sort_dt"])
 
-        df = pd.concat([df, pd.DataFrame([new_record], columns=BUSINESS_HANDOVER_COLUMNS)], ignore_index=True)
-        save_business_handover_data(df)
-        st.success("業務全体申し送りを保存しました。")
-        st.rerun()
+        st.caption(f"検索結果：{len(filtered)}件")
 
-    st.divider()
-    st.subheader("業務全体申し送り一覧")
+        if filtered.empty:
+            st.info("条件に合う申し送りはありません。")
+            return
 
-    df = load_business_handover_data()
-    if df.empty:
-        st.info("まだ業務全体申し送りは登録されていません。")
-        return
+        display_df = filtered.copy()
+        display_df["日付"] = pd.to_datetime(display_df["日付"], errors="coerce").dt.strftime("%Y-%m-%d")
+        st.dataframe(
+            display_df[["日付", "勤務帯", "記入者", "優先度", "対応状況", "全体申し送り", "要確認事項", "記録日時"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        filter_date = st.date_input("表示する日付", value=date.today(), key="business_handover_filter_date")
-    with c2:
-        filter_status = st.selectbox("対応状況", ["すべて", "未対応", "対応中", "対応済"], key="business_handover_filter_status")
-    with c3:
-        filter_priority = st.selectbox("優先度", ["すべて", "通常", "注意", "至急"], key="business_handover_filter_priority")
+        st.divider()
+        st.subheader("選択した申し送りの更新・削除")
 
-    view_df = get_business_handover_by_date(df, filter_date)
+        def make_select_label(row):
+            d = pd.to_datetime(row.get("日付"), errors="coerce")
+            d_text = d.strftime("%Y-%m-%d") if not pd.isna(d) else "日付不明"
+            note = clean_text(row.get("全体申し送り", "")) or clean_text(row.get("要確認事項", ""))
+            if len(note) > 24:
+                note = note[:24] + "..."
+            return f"{d_text}｜{clean_text(row.get('勤務帯'))}｜{clean_text(row.get('記入者'))}｜{clean_text(row.get('優先度'))}｜{clean_text(row.get('対応状況'))}｜{note}"
 
-    if filter_status != "すべて":
-        view_df = view_df[view_df["対応状況"] == filter_status]
-    if filter_priority != "すべて":
-        view_df = view_df[view_df["優先度"] == filter_priority]
+        select_options = []
+        label_to_id = {}
+        for _, row in filtered.iterrows():
+            label = make_select_label(row)
+            rid = clean_text(row.get("記録ID"))
+            if not rid:
+                continue
+            # 同じラベルがあっても選べるように末尾へIDの一部を付ける
+            unique_label = f"{label}｜ID:{rid[-6:]}"
+            select_options.append(unique_label)
+            label_to_id[unique_label] = rid
 
-    if view_df.empty:
-        st.info("条件に合う申し送りはありません。")
-        return
+        selected_label = st.selectbox("編集・削除する申し送りを選択", select_options, key="bh_selected_record")
+        selected_id = label_to_id.get(selected_label)
 
-    for _, row in view_df.iterrows():
-        render_business_handover_card(row)
+        selected_rows = df[df["記録ID"].astype(str) == str(selected_id)]
+        if selected_rows.empty:
+            st.warning("選択した記録が見つかりません。")
+            return
 
+        selected_row = selected_rows.iloc[0]
+        render_business_handover_card(selected_row)
+
+        selected_date = pd.to_datetime(selected_row.get("日付"), errors="coerce")
+        if pd.isna(selected_date):
+            selected_date_value = date.today()
+        else:
+            selected_date_value = selected_date.date()
+
+        shift_options = ["日勤", "夜勤"]
+        priority_options = ["通常", "注意", "至急"]
+        status_options = ["未対応", "対応中", "対応済"]
+
+        with st.form("business_handover_update_form", clear_on_submit=False):
+            u1, u2, u3 = st.columns(3)
+            with u1:
+                update_date = st.date_input("日付", value=selected_date_value, key="bh_update_date")
+            with u2:
+                update_shift = st.selectbox(
+                    "勤務帯",
+                    shift_options,
+                    index=shift_options.index(clean_text(selected_row.get("勤務帯"), "日勤")) if clean_text(selected_row.get("勤務帯"), "日勤") in shift_options else 0,
+                    key="bh_update_shift",
+                )
+            with u3:
+                update_staff = st.text_input("記入者", value=clean_text(selected_row.get("記入者")), key="bh_update_staff")
+
+            update_overall = st.text_area(
+                "全体申し送り",
+                value=clean_text(selected_row.get("全体申し送り")),
+                height=150,
+                key="bh_update_overall",
+            )
+            update_check = st.text_area(
+                "要確認事項",
+                value=clean_text(selected_row.get("要確認事項")),
+                height=120,
+                key="bh_update_check",
+            )
+
+            u4, u5 = st.columns(2)
+            with u4:
+                update_priority = st.selectbox(
+                    "優先度",
+                    priority_options,
+                    index=priority_options.index(clean_text(selected_row.get("優先度"), "通常")) if clean_text(selected_row.get("優先度"), "通常") in priority_options else 0,
+                    key="bh_update_priority",
+                )
+            with u5:
+                update_status = st.selectbox(
+                    "対応状況",
+                    status_options,
+                    index=status_options.index(clean_text(selected_row.get("対応状況"), "未対応")) if clean_text(selected_row.get("対応状況"), "未対応") in status_options else 0,
+                    key="bh_update_status",
+                )
+
+            update_submitted = st.form_submit_button("この申し送りを更新する", use_container_width=True)
+
+        if update_submitted:
+            if not clean_text(update_staff):
+                st.warning("記入者を入力してください。")
+                st.stop()
+            if not clean_text(update_overall) and not clean_text(update_check):
+                st.warning("全体申し送り、または要確認事項を入力してください。")
+                st.stop()
+
+            df_update = load_business_handover_data()
+            mask = df_update["記録ID"].astype(str) == str(selected_id)
+            if not mask.any():
+                st.error("更新対象の記録が見つかりません。")
+                st.stop()
+
+            df_update.loc[mask, "日付"] = pd.to_datetime(update_date)
+            df_update.loc[mask, "勤務帯"] = update_shift
+            df_update.loc[mask, "記入者"] = clean_text(update_staff)
+            df_update.loc[mask, "全体申し送り"] = clean_text(update_overall)
+            df_update.loc[mask, "要確認事項"] = clean_text(update_check)
+            df_update.loc[mask, "優先度"] = update_priority
+            df_update.loc[mask, "対応状況"] = update_status
+            df_update.loc[mask, "記録日時"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            save_business_handover_data(df_update)
+            st.success("業務全体申し送りを更新しました。")
+            st.rerun()
+
+        st.divider()
+        st.subheader("削除")
+        st.warning("削除すると、この申し送り記録は一覧と管理者ダッシュボードから消えます。")
+        confirm_delete = st.checkbox("この申し送りを削除することを確認しました", key="bh_confirm_delete")
+        if st.button("この申し送りを削除する", type="primary", disabled=not confirm_delete, use_container_width=True, key="bh_delete_button"):
+            df_delete = load_business_handover_data()
+            before_count = len(df_delete)
+            df_delete = df_delete[df_delete["記録ID"].astype(str) != str(selected_id)].copy()
+            after_count = len(df_delete)
+
+            if before_count == after_count:
+                st.error("削除対象の記録が見つかりません。")
+            else:
+                save_business_handover_data(df_delete)
+                st.success("業務全体申し送りを削除しました。")
+                st.rerun()
 
 def show_admin_business_handover_summary(target_date):
     st.subheader("🏠 業務全体申し送り")
